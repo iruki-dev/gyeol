@@ -5,6 +5,16 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M3 — attribute heads
+- License-gated frozen SSL encoder adapters (local checkpoints only) and a DSP baseline encoder.
+- Multi-task frame heads (register, phonation qualities, laryngeal contrast, phones) and a deterministic training
+  loop.
+- Temperature scaling on held-out singers; Mahalanobis OOD on the embedding and the inputs, reported as "unknown".
+- Quality-factor confidence; learned curves integrated into `analyze`.
+- Probing suite: grouped logistic/ridge probes, leakage tests, probe battery.
+- Pitch consensus accepts strong harmonic salience as voicing evidence (breathy voices).
+- Note segmentation merges only monotonic pitch sweeps; minimum durations for falls and scoops.
+
 ### M2 — data
 - Dataset adapters (VocalSet, AI Hub #465/#473 with an explicit field map and printed conditions, GTSinger
   research-only with on/off pairing, consent-gated own recordings).

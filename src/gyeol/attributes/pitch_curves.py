@@ -43,6 +43,8 @@ class EventConfig:
     scoop_max_s: float = 0.3
     fall_min_cents: float = 80.0
     fall_window_s: float = 0.25
+    fall_min_s: float = 0.05
+    scoop_min_s: float = 0.04
     kkeokki_min_cents: float = 80.0
     kkeokki_min_s: float = 0.05
     kkeokki_max_s: float = 0.25
@@ -122,26 +124,40 @@ def vibrato_curves(cents: np.ndarray, center: np.ndarray, voiced: np.ndarray, gr
 
 def notes_from_pitch(cents: np.ndarray, voiced: np.ndarray, grid: FrameGrid, center: np.ndarray | None = None,
                      min_stable_s: float = 0.2, max_unstable_range: float = 100.0) -> list[NoteSpan]:
-    """Notes = pitch-stable segments.  Short segments whose pitch keeps moving
-    (end-of-note falls, scoops, glide transitions) are merged into the
-    neighbouring note of the same voiced run instead of becoming notes."""
+    """Notes = pitch-stable segments.
+
+    A segment shorter than ``min_stable_s`` whose raw pitch *sweeps* (range >
+    ``max_unstable_range`` and mostly monotonic: |end − start| > 0.6·range)
+    is a scoop / fall / glide transition, not a note: it is merged into the
+    contiguous previous note (tail) or, failing that, the next one (head).
+    Oscillating segments (vibrato) and stable short notes are kept.
+    """
     raw = segment_notes(cents, voiced, grid.hop_seconds)
-    if center is None or not raw:
+    if not raw:
         return raw
     min_len = int(min_stable_s * grid.rate)
 
-    def unstable(n: NoteSpan) -> bool:
-        seg = center[n.start : n.end]
-        return (n.end - n.start) < min_len and np.nanmax(seg) - np.nanmin(seg) > max_unstable_range
+    def sweep(n: NoteSpan) -> bool:
+        seg = cents[n.start : n.end]
+        seg = seg[np.isfinite(seg)]
+        if (n.end - n.start) >= min_len or seg.size < 3:
+            return False
+        rng = seg.max() - seg.min()
+        return rng > max_unstable_range and abs(seg[-1] - seg[0]) > 0.6 * rng
 
     out: list[NoteSpan] = []
+    pending_head: NoteSpan | None = None
     for n in raw:
-        if out and unstable(n) and n.start - out[-1].end <= 1:
-            out[-1] = NoteSpan(out[-1].start, n.end)  # tail of the previous note
-        elif out and unstable(out[-1]) and n.start - out[-1].end <= 1 and (out[-1].end - out[-1].start) < min_len:
-            out[-1] = NoteSpan(out[-1].start, n.end)  # previous was a head of this note
-        else:
-            out.append(n)
+        if sweep(n):
+            if out and n.start - out[-1].end <= 1:
+                out[-1] = NoteSpan(out[-1].start, n.end)  # tail of the previous note
+            else:
+                pending_head = n  # head of the next note
+            continue
+        if pending_head is not None and n.start - pending_head.end <= 1:
+            n = NoteSpan(pending_head.start, n.end)
+        pending_head = None
+        out.append(n)
     return out
 
 
@@ -164,7 +180,7 @@ def detect_events(cents: np.ndarray, center: np.ndarray, voiced: np.ndarray, con
         if np.isfinite(head).sum() >= 3:
             start_dev = target - np.nanmin(head[: max(2, k // 3)])
             arrived = np.flatnonzero(np.abs(head - target) <= 30)
-            if start_dev >= cfg.scoop_min_cents and arrived.size:
+            if start_dev >= cfg.scoop_min_cents and arrived.size and arrived[0] / fps >= cfg.scoop_min_s:
                 j = int(arrived[0])
                 ev.append(Event("scoop", s, s + max(j, 1), float(start_dev), float(np.mean(conf[s : s + max(j, 1)])), {"note_start": s}))
         # fall: only when the note is released into silence (a legato drop into
@@ -174,9 +190,9 @@ def detect_events(cents: np.ndarray, center: np.ndarray, voiced: np.ndarray, con
         released = e >= len(voiced) or not voiced[e : min(len(voiced), e + int(0.05 * fps))].any()
         if released and np.isfinite(tail).sum() >= 3:
             drop = target - np.nanmin(tail[-max(2, k // 3) :])
-            if drop >= cfg.fall_min_cents:
-                left = np.flatnonzero(np.abs(tail - target) <= 30)
-                j = int(left[-1]) if left.size else 0
+            left = np.flatnonzero(np.abs(tail - target) <= 30)
+            j = int(left[-1]) if left.size else 0
+            if drop >= cfg.fall_min_cents and (k - j) / fps >= cfg.fall_min_s:
                 ev.append(Event("fall", e - k + j, e, float(drop), float(np.mean(conf[e - k + j : e])), {"note_end": e}))
         # kkeokki: a single excursion from the local centre, isolated in time
         # (vibrato produces a train of alternating excursions instead)

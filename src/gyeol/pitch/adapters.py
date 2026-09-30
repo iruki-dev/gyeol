@@ -131,12 +131,12 @@ class RMVPETracker:
     def __init__(self, weights_path: str, profile: Profile = Profile.COMMERCIAL):
         require_allowed(lookup(self.asset), profile, announce=False)
         raise NotImplementedError(
-            "TODO(M3): reimplement the RMVPE network and load weights fetched with `gyeol fetch rmvpe`; "
+            "TODO(M8): reimplement the RMVPE network and verify it against weights fetched with `gyeol fetch rmvpe`; "
             "until then use SwiftF0Tracker / FCPETracker / DSP trackers"
         )
 
     def track(self, audio: np.ndarray, sr: int) -> Result[PitchTrack]:  # pragma: no cover
-        raise NotImplementedError("TODO(M3)")
+        raise NotImplementedError("TODO(M8)")
 
 
 def default_trackers(profile: Profile = Profile.COMMERCIAL) -> list:

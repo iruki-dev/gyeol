@@ -57,6 +57,8 @@ class ConsensusConfig:
     max_subharmonic_ratio: float = 0.6
     voicing_threshold: float = 0.5
     min_salience: float = 0.05
+    #: harmonic salience that counts as voicing evidence on its own
+    strong_salience: float = 0.4
     min_run_frames: int = 3
 
 
@@ -188,7 +190,10 @@ def consensus(audio: np.ndarray, sr: int, grid: FrameGrid, trackers: Sequence[Pi
         refined = np.where(agree.any(1), np.nanmean(np.where(agree, tc, np.nan), axis=1), c0) if N else c0
     f0 = 440.0 * 2 ** (refined / 1200)
     voiced_prob = VP.mean(axis=1)
-    voiced = has & (voiced_prob >= cfg.voicing_threshold) & (np.nan_to_num(s_ch) >= cfg.min_salience)
+    # voiced when the trackers' vote passes, or when the spectrum itself shows
+    # strong harmonic structure (breathy voices make YIN-family trackers abstain)
+    sal_ok = np.nan_to_num(s_ch)
+    voiced = has & (sal_ok >= cfg.min_salience) & ((voiced_prob >= cfg.voicing_threshold) | (sal_ok >= cfg.strong_salience))
     voiced = _drop_short(voiced, cfg.min_run_frames)
     support = (agree.sum(1) + cfg.folded_vote * agree_fold.sum(1)) / max(N, 1)
     conf = np.where(voiced, np.clip(voiced_prob, 0, 1) * np.clip(support, 0, 1) * np.clip(np.nan_to_num(s_ch) / 0.2, 0, 1), 0.0)

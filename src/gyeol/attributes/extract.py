@@ -32,7 +32,6 @@ from ..frontend.quality import QualityPolicy, assess
 from ..pitch.adapters import default_trackers
 from ..pitch.base import PitchTracker
 from ..pitch.consensus import ConsensusConfig, consensus
-from ..dsp.notes import segment_notes
 from .pitch_curves import EventConfig, detect_events, notes_from_pitch, pitch_center, vibrato_curves
 from .signal import harmonic_noise, loudness, relative_loudness
 
@@ -44,6 +43,9 @@ class AnalysisConfig:
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     quality: QualityPolicy = field(default_factory=QualityPolicy)
     events: EventConfig = field(default_factory=EventConfig)
+    #: optional learned heads (M3) and the frame encoder that feeds them
+    heads: object | None = None  # CalibratedHeads
+    feature_encoder: object | None = None  # FrameEncoder or DSPFrameFeatures
 
 
 def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = None, content: ContentFeatures | None = None,
@@ -92,8 +94,7 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     add("aperiodic_db", ape, hn_conf, "dB")
     add("aperiodic_ratio", ape - per, hn_conf, "dB")
 
-    raw_notes = segment_notes(cents, voiced, grid.hop_seconds)
-    notes = notes_from_pitch(cents, voiced, grid, pitch_center(cents, voiced, grid, segments=raw_notes))
+    notes = notes_from_pitch(cents, voiced, grid)
     center = pitch_center(cents, voiced, grid, segments=notes)
     add("pitch_center", center, p.f0_conf, "cents re A4")
     rate, extent, vconf = vibrato_curves(cents, center, voiced, grid, p.f0_conf)
@@ -113,4 +114,28 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
               "failed_trackers": p.failed_trackers, "octave_repaired_fraction": float(p.octave_repaired[voiced].mean())},
     )
     warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings
+    if cfg.heads is not None:
+        lr = _learned_curves(rep, xc, sr, cfg, ff, voiced)
+        if lr.ok:
+            for c in lr.value.values():
+                rep.curves.add(c)
+        else:
+            warnings.append(f"learned heads skipped: {lr.reason}")
     return Result(pr.status, rep, "", warnings)
+
+
+def _learned_curves(rep: Representation, x: np.ndarray, sr: int, cfg: AnalysisConfig, ff: np.ndarray, voiced: np.ndarray) -> Result[dict]:
+    from ..encoders.frame import DSPFrameFeatures
+
+    enc = cfg.feature_encoder or DSPFrameFeatures()
+    if isinstance(enc, DSPFrameFeatures):
+        feats = enc.from_representation(rep)
+    else:
+        r = enc.encode(x, sr, rep.grid)
+        if not r.ok:
+            return Result.failure(r.reason)
+        feats = np.nan_to_num(r.value)
+    try:
+        return Result.success(cfg.heads.curves(feats, rep.grid, quality_factor=ff, voiced=voiced))
+    except RuntimeError as exc:  # e.g. feature dimension mismatch
+        return Result.failure(f"heads could not run on these features: {exc}")
