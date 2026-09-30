@@ -1,4 +1,4 @@
-"""Invariance study runner (research §5.ii).
+"""Invariance study runner (ported from gyeol v0.1).
 
 Input: a long table of note- or recording-level dimension values keyed by
 (singer, condition) where *condition* is a device, room, codec, degradation
@@ -15,7 +15,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ..representation import VocalRepresentation
+from ..core.containers import Representation
 from .stats import bland_altman, icc, icc_ci, koo_li, mdc95, sem, within_between_ratio
 
 
@@ -26,15 +26,15 @@ class Record:
     values: dict[str, float]
 
 
-def recording_values(rep: VocalRepresentation, dims: Iterable[str] | None = None) -> dict[str, float]:
-    """Median of valid frames per 1-D dimension (NaN if none valid)."""
+def recording_values(rep: Representation, names: Iterable[str] | None = None, min_confidence: float = 0.5) -> dict[str, float]:
+    """Median of confident frames per 1-D attribute curve (NaN if none)."""
     out = {}
-    for name, tr in rep.tracks.items():
-        if dims is not None and name not in dims:
+    for name, c in rep.curves.items():
+        if names is not None and name not in names:
             continue
-        if tr.values.ndim != 1:
+        if c.values.ndim != 1:
             continue
-        v = tr.valid_values()
+        v = c.values[(c.confidence >= min_confidence) & np.isfinite(c.values)]
         out[name] = float(np.median(v)) if v.size else float("nan")
     return out
 
@@ -53,6 +53,9 @@ class DimensionReport:
     bias_vs_reference: dict[str, float]
     loa_vs_reference: dict[str, tuple[float, float]]
     accepted: bool
+    #: conditions entering the ICC; a condition where the dimension was never measured (e.g. an explanation
+    #: item withheld as "cannot judge" under heavy noise) is left out instead of discarding every subject
+    conditions_used: list[str] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,7 +71,12 @@ def invariance_report(records: list[Record], reference: str, min_icc: float = 0.
     table = {(r.singer, r.condition): r.values for r in records}
     out: dict[str, DimensionReport] = {}
     for d in dims:
-        y = np.array([[table.get((s, c), {}).get(d, np.nan) for c in conditions] for s in singers])
+        y_all = np.array([[table.get((s, c), {}).get(d, np.nan) for c in conditions] for s in singers])
+        measured = ~np.all(np.isnan(y_all), axis=0)
+        if not measured[0]:
+            continue  # never measured in the reference condition
+        used = [c for c, m in zip(conditions, measured) if m]
+        y = y_all[:, measured]
         complete = ~np.isnan(y).any(axis=1)
         yc = y[complete]
         if len(yc) < 3:
@@ -82,10 +90,10 @@ def invariance_report(records: list[Record], reference: str, min_icc: float = 0.
         flat_s = np.repeat(np.arange(len(yc)), yc.shape[1])
         wb = within_between_ratio(flat_v, flat_s)
         bias, loa = {}, {}
-        for j, c in enumerate(conditions[1:], start=1):
+        for j, c in enumerate(used[1:], start=1):
             ba = bland_altman(yc[:, 0], yc[:, j])
             bias[c] = ba.bias
             loa[c] = (ba.loa_low, ba.loa_high)
         accepted = bool(val >= min_icc and all(abs(b) < m for b in bias.values()))
-        out[d] = DimensionReport(d, int(len(yc)), val, ci, koo_li(val), sd, s, m, wb, bias, loa, accepted)
+        out[d] = DimensionReport(d, int(len(yc)), val, ci, koo_li(val), sd, s, m, wb, bias, loa, accepted, used)
     return out

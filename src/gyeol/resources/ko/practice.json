@@ -1,0 +1,223 @@
+{
+  "_comment": "Attribute → practice-exercise mapping. AUTHORED DATA, NOT CODE: coaches edit this file; gyeol.coach.practice only looks keys up. Keys: '<attribute>:<status|pos|neg>' first, then '<attribute>', then fnmatch patterns ('quality_*'); 'route:<id>' for onboarding routes. The initial texts are an engineering draft and must be reviewed by a voice teacher before release.",
+  "reviewed_by": null,
+  "exercises": {
+    "drone_match": {
+      "title": "드론 음에 맞추기",
+      "instructions": "한 음을 길게 켜 둔 반주(드론)에 맞춰 '아'로 4초씩 소리 내고, 흔들림 없이 맞는 느낌을 찾아요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "slide_into_pitch": {
+      "title": "아래·위에서 미끄러져 도착하기",
+      "instructions": "목표 음보다 살짝 아래(또는 위)에서 시작해 천천히 미끄러져 목표 음에 멈춰요. 도착한 순간을 귀로 확인해요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "interval_steps": {
+      "title": "음정 간격 계단",
+      "instructions": "문제 구간의 두 음을 피아노와 함께 천천히 번갈아 부르고, 간격이 좁아지지 않게 두 번째 음을 끝까지 뻗어요.",
+      "level": "beginner",
+      "minutes": 4
+    },
+    "clap_and_speak": {
+      "title": "박자에 맞춰 가사 읽기",
+      "instructions": "메트로놈에 맞춰 손뼉을 치며 가사를 리듬대로 읽은 다음, 같은 박자로 불러요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "entry_breath": {
+      "title": "들어가기 전 숨 준비",
+      "instructions": "들어갈 박의 한 박 앞에서 숨을 쉬고, 첫 자음을 박에 정확히 놓는 연습을 반복해요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "tempo_steady": {
+      "title": "메트로놈과 함께 부르기",
+      "instructions": "원래보다 조금 느린 템포의 메트로놈과 한 번, 원래 템포로 한 번 불러 속도가 일정한지 들어 봐요.",
+      "level": "beginner",
+      "minutes": 4
+    },
+    "scoop_imitation": {
+      "title": "스쿱 따라 하기",
+      "instructions": "목표 가수의 해당 음 시작을 여러 번 듣고, 아래에서 올려 잡는 폭과 속도를 천천히 따라 해요.",
+      "level": "intermediate",
+      "minutes": 3
+    },
+    "fall_release": {
+      "title": "끝 음 떨구기",
+      "instructions": "음 끝에서 힘을 빼며 자연스럽게 내려오는 연습을 해요. 억지로 누르지 않아요.",
+      "level": "intermediate",
+      "minutes": 3
+    },
+    "kkeokki_slow": {
+      "title": "꺾기 느리게 연습",
+      "instructions": "꺾는 두 음을 아주 느리게 이어 부른 뒤 점점 빠르게 해요. 목에 힘이 들어가면 멈춰요.",
+      "level": "intermediate",
+      "minutes": 4
+    },
+    "legato_glide": {
+      "title": "음 사이 이어 부르기",
+      "instructions": "두 음 사이를 끊지 않고 미끄러지듯 이어 불러요. 먼저 '우'로, 다음에 가사로 해요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "vibrato_pulses": {
+      "title": "비브라토 박동 연습",
+      "instructions": "긴 음 위에서 메트로놈에 맞춰 음을 살짝 흔들어 보고, 점점 자연스러운 속도로 바꿔요.",
+      "level": "intermediate",
+      "minutes": 4
+    },
+    "straight_tone": {
+      "title": "곧은 소리 유지",
+      "instructions": "긴 음을 흔들림 없이 곧게 유지하고, 마지막에만 비브라토를 조금 더해 봐요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "breath_onset": {
+      "title": "숨 섞임 조절",
+      "instructions": "'하' 소리로 부드럽게 시작하다가 '아'로 바꿔 숨이 섞이는 정도를 비교해 봐요. 편한 만큼만 해요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "clear_onset": {
+      "title": "선명한 소리 시작",
+      "instructions": "가볍게 허밍한 뒤 같은 느낌으로 모음을 열어, 숨이 새지 않는 선명한 시작을 찾아요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "messa_di_voce": {
+      "title": "작게-크게-작게",
+      "instructions": "한 음을 작게 시작해 크게 키웠다가 다시 작게 줄여요. 음정이 흔들리지 않게 해요.",
+      "level": "intermediate",
+      "minutes": 4
+    },
+    "phrase_dynamics": {
+      "title": "프레이즈 강약 그리기",
+      "instructions": "목표 가수의 프레이즈에서 커지고 작아지는 곳을 표시하고, 그 모양대로 따라 불러요.",
+      "level": "beginner",
+      "minutes": 4
+    },
+    "register_sirens": {
+      "title": "사이렌(음역 오르내리기)",
+      "instructions": "편한 낮은 음에서 높은 음까지 '우'나 입술 떨기로 부드럽게 오르내려요. 소리가 바뀌는 지점을 편하게 지나가요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "consonant_contrast": {
+      "title": "자음 세기 구분",
+      "instructions": "'다·따·타'처럼 예사소리·된소리·거센소리를 천천히 말해 본 뒤, 문제 가사를 목표 가수처럼 말하고 불러요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "lyric_speaking": {
+      "title": "가사 또박또박 말하기",
+      "instructions": "목표 가수의 발음을 들으며 가사를 먼저 말로 따라 하고, 같은 입 모양으로 불러요.",
+      "level": "beginner",
+      "minutes": 3
+    },
+    "own_voice_imitation": {
+      "title": "내 목소리 따라 하기",
+      "instructions": "방금 녹음한 내 목소리의 한 음을 듣고 그대로 다시 불러요. 내 소리와 같은 음을 찾는 연습이에요.",
+      "level": "beginner",
+      "minutes": 4
+    },
+    "wide_pitch_matching": {
+      "title": "넓은 음역 음 맞추기",
+      "instructions": "여러 높이의 음을 하나씩 듣고 편한 옥타브에서 따라 불러요. 틀려도 괜찮아요, 가까워지는 느낌을 찾아요.",
+      "level": "beginner",
+      "minutes": 5
+    },
+    "listening_compare": {
+      "title": "두 음 비교해 듣기",
+      "instructions": "두 음을 듣고 어느 쪽이 높은지 골라요. 차이가 작아지면서 귀가 섬세해져요.",
+      "level": "beginner",
+      "minutes": 3
+    }
+  },
+  "mapping": {
+    "intonation_offset": [
+      "drone_match",
+      "slide_into_pitch"
+    ],
+    "global_offset": [
+      "drone_match"
+    ],
+    "interval_compression": [
+      "interval_steps"
+    ],
+    "onset_timing": [
+      "entry_breath",
+      "clap_and_speak"
+    ],
+    "tempo": [
+      "tempo_steady",
+      "clap_and_speak"
+    ],
+    "scoop:missing": [
+      "scoop_imitation"
+    ],
+    "scoop:extra": [
+      "straight_tone",
+      "slide_into_pitch"
+    ],
+    "scoop": [
+      "scoop_imitation"
+    ],
+    "fall": [
+      "fall_release"
+    ],
+    "kkeokki": [
+      "kkeokki_slow"
+    ],
+    "glide": [
+      "legato_glide"
+    ],
+    "vibrato_extent:neg": [
+      "vibrato_pulses"
+    ],
+    "vibrato_extent:pos": [
+      "straight_tone"
+    ],
+    "vibrato_rate": [
+      "vibrato_pulses"
+    ],
+    "breathiness:pos": [
+      "clear_onset"
+    ],
+    "breathiness:neg": [
+      "breath_onset"
+    ],
+    "loudness": [
+      "messa_di_voce"
+    ],
+    "dynamic_range": [
+      "phrase_dynamics",
+      "messa_di_voce"
+    ],
+    "register": [
+      "register_sirens"
+    ],
+    "quality_*": [
+      "register_sirens"
+    ],
+    "laryngeal_*": [
+      "consonant_contrast"
+    ],
+    "phone_match": [
+      "lyric_speaking"
+    ],
+    "route:own_voice_imitation": [
+      "own_voice_imitation"
+    ],
+    "route:wide_range_pitch_matching": [
+      "wide_pitch_matching"
+    ],
+    "route:perception_training": [
+      "listening_compare"
+    ],
+    "route:standard": [
+      "drone_match"
+    ]
+  }
+}

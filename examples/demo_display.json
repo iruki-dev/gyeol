@@ -1,0 +1,12 @@
+{
+  "_comment": "DEMO-ONLY display filter, not coaching thresholds. The coach layer (M6) must pick operating thresholds from validation data with gyeol.verification.thresholds.",
+  "min_abs_magnitude": {
+    "cents": 15,
+    "ms": 30,
+    "%": 3,
+    "Hz": 0.5,
+    "dB": 1.0,
+    "probability": 0.1
+  },
+  "min_confidence": 0.3
+}

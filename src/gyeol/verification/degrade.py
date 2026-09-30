@@ -19,7 +19,7 @@ from typing import Callable, Iterator
 import numpy as np
 from scipy import signal
 
-from .._dsp import EPS, resample
+from ..dsp.base import EPS, resample
 
 
 def add_noise(x: np.ndarray, snr_db: float, noise: str | np.ndarray = "white", seed: int = 0, active_only: bool = True) -> np.ndarray:

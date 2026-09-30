@@ -1,98 +1,118 @@
 """Command-line interface.
 
-    gyeol analyze take.wav -o take.npz --lyrics "사랑해" --summary
-    gyeol spec
-    gyeol fit-device reference.wav phone.wav -o phone.json
+    gyeol licenses                 list registered assets and their tags
+    gyeol fetch <name> [--yes]     show the license, ask, then download
+    gyeol profile [wav]            per-stage latency of the analysis pipeline
 """
 
 from __future__ import annotations
 
 import argparse
-import json
+import hashlib
 import sys
+import urllib.request
+from pathlib import Path
 
 from . import __version__
-from .engine import Engine, EngineConfig
-from .spec import DIMENSIONS, NOTE_DIMENSIONS, OMISSIONS
+from .core.license import REGISTRY, Profile, decide, lookup
+
+CACHE = Path.home() / ".cache" / "gyeol"
 
 
-def _analyze(args: argparse.Namespace) -> int:
-    from .frontend.equalization import DeviceProfile
-
-    profile = DeviceProfile.load(args.device_profile) if args.device_profile else None
-    notes = None
-    if args.notes:
-        notes = [tuple(map(float, line.split()[:2])) for line in open(args.notes, encoding="utf-8") if line.strip()]
-    engine = Engine(EngineConfig(use_g2pk=args.g2pk), device_profile=profile)
-    rep = engine.analyze(args.input, lyrics=args.lyrics, textgrid=args.textgrid, notes=notes)
-    if args.output:
-        rep.save(args.output)
-    if args.summary or not args.output:
-        print(rep.to_json())
+def _licenses(args: argparse.Namespace) -> int:
+    prof = Profile(args.profile)
+    for a in REGISTRY.values():
+        d = decide(a, prof)
+        mark = "allowed" if d.allowed else "REFUSED"
+        ver = "" if a.verified else " (unverified)"
+        print(f"{a.name:26s} {a.kind.value:10s} {a.tag.value:26s} {a.license:18s} {mark}{ver}")
     return 0
 
 
-def _spec(args: argparse.Namespace) -> int:
-    if args.json:
-        print(json.dumps({"frame": {k: v.to_dict() for k, v in DIMENSIONS.items()},
-                          "note": {k: v.to_dict() for k, v in NOTE_DIMENSIONS.items()},
-                          "omissions": OMISSIONS}, ensure_ascii=False, indent=2))
-        return 0
-    for title, table in (("frame-level", DIMENSIONS), ("note-level", NOTE_DIMENSIONS)):
-        print(f"## {title}")
-        for d in table.values():
-            flag = "  [hypothesis]" if d.hypothesis else ""
-            print(f"{d.name:24s} {d.unit:22s} {d.rate:14s} {d.validity}{flag}")
-        print()
-    print("## declared omissions")
-    for k, v in OMISSIONS.items():
-        print(f"{k:24s} {v}")
+def _fetch(args: argparse.Namespace, stdin=None) -> int:
+    asset = lookup(args.name)
+    prof = Profile(args.profile)
+    d = decide(asset, prof)
+    print(f"asset:    {asset.name} ({asset.kind.value})")
+    print(f"license:  {asset.license}  [{asset.tag.value}]{'' if asset.verified else '  (tag not re-verified upstream)'}")
+    print(f"source:   {asset.source or '-'}")
+    for line in list(asset.conditions) + list(asset.caveats):
+        print(f"note:     {line}")
+    if not d.allowed:
+        print(f"refused:  {d.reason}", file=sys.stderr)
+        return 2
+    if asset.url is None:
+        print("This asset has no registered download URL; obtain it manually from the source above and place it in", CACHE / asset.name)
+        return 3
+    if not args.yes:
+        stream = stdin or sys.stdin
+        print(f"Download {asset.url} to {CACHE / asset.name}? Type 'yes' to accept the license: ", end="", flush=True)
+        if stream.readline().strip().lower() != "yes":
+            print("aborted")
+            return 1
+    dest = CACHE / asset.name / Path(asset.url).name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    urllib.request.urlretrieve(asset.url, dest)  # noqa: S310 - explicit, user-confirmed download
+    if asset.sha256:
+        digest = hashlib.sha256(dest.read_bytes()).hexdigest()
+        if digest != asset.sha256:
+            dest.unlink()
+            print(f"checksum mismatch for {dest}", file=sys.stderr)
+            return 4
+    print(f"saved {dest}")
     return 0
 
 
-def _fit_device(args: argparse.Namespace) -> int:
-    from .frontend.equalization import DeviceProfile
-    from .io import load_audio
+def _profile(args: argparse.Namespace) -> int:
+    """Per-stage wall time of the signal-layer analysis (and explanation against itself)."""
+    from .export.latency import environment, pipeline_profile
+    from .pitch.adapters import PyinTracker, SHSTracker, YinTracker
 
-    ref, sr_r = load_audio(args.reference)
-    dev, sr_d = load_audio(args.device)
-    if sr_r != sr_d:
-        from ._dsp import resample
+    if args.wav:
+        from .io import load_audio
 
-        dev = resample(dev, sr_d, sr_r)
-    prof = DeviceProfile.fit(ref, dev, sr_r, name=args.name or args.device)
-    prof.save(args.output)
-    print(json.dumps({"name": prof.name, "highpass_hz": prof.highpass_hz}, ensure_ascii=False))
+        x, sr = load_audio(args.wav)
+    else:
+        from .synth import SynthNote, melody
+
+        notes = [SynthNote(f, 0.6, gap_after=0.15) for f in (262, 294, 330, 349, 392, 330) * max(1, int(args.seconds // 4.5))]
+        m = melody(notes, sr=44100)
+        x, sr = m.audio, 44100
+    trackers = [PyinTracker(), YinTracker(), SHSTracker()] if args.dsp_only else None
+    target = None
+    if args.explain:
+        from .attributes.extract import analyze
+        from .core.consent import Provenance
+        from .core.containers import Recording
+
+        target = analyze(Recording(x, sr, Provenance.SYNTHETIC), trackers=trackers).unwrap()
+    prof = pipeline_profile(x, sr, target, trackers, n_runs=args.runs)
+    dur = prof.pop("audio_seconds")
+    print(f"audio {dur:.2f} s; environment {environment()}")
+    for k, v in sorted(prof.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:16s} {v * 1000:9.1f} ms   RTF {v / dur:6.3f}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="gyeol", description="Singing-voice intermediate representation engine")
+    p = argparse.ArgumentParser(prog="gyeol", description="gyeol v2 — interpretable singing-voice model")
     p.add_argument("--version", action="version", version=f"gyeol {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
-
-    a = sub.add_parser("analyze", help="analyse an audio file")
-    a.add_argument("input")
-    a.add_argument("-o", "--output", help="write the representation (.npz)")
-    a.add_argument("--lyrics", help="Korean lyrics for context tokens")
-    a.add_argument("--textgrid", help="forced-alignment TextGrid (MFA)")
-    a.add_argument("--notes", help="text file with 'start end' seconds per line")
-    a.add_argument("--device-profile", help="DeviceProfile JSON for device EQ")
-    a.add_argument("--g2pk", action="store_true", help="use g2pK for surface pronunciation")
-    a.add_argument("--summary", action="store_true", help="print a JSON summary")
-    a.set_defaults(fn=_analyze)
-
-    s = sub.add_parser("spec", help="print the dimension specification")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(fn=_spec)
-
-    f = sub.add_parser("fit-device", help="fit a DeviceProfile from simultaneous recordings")
-    f.add_argument("reference")
-    f.add_argument("device")
-    f.add_argument("-o", "--output", required=True)
-    f.add_argument("--name")
-    f.set_defaults(fn=_fit_device)
-
+    lic = sub.add_parser("licenses", help="list registered assets and license decisions")
+    lic.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
+    lic.set_defaults(fn=_licenses)
+    f = sub.add_parser("fetch", help="show a license, ask for confirmation, then download")
+    f.add_argument("name")
+    f.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
+    f.add_argument("--yes", action="store_true", help="accept the shown license non-interactively")
+    f.set_defaults(fn=_fetch)
+    pr = sub.add_parser("profile", help="per-stage latency of the analysis pipeline on this machine")
+    pr.add_argument("wav", nargs="?", help="audio file (default: a synthetic melody)")
+    pr.add_argument("--seconds", type=float, default=9.0, help="length of the synthetic melody")
+    pr.add_argument("--runs", type=int, default=3)
+    pr.add_argument("--dsp-only", action="store_true", help="use only gyeol's DSP pitch trackers")
+    pr.add_argument("--explain", action="store_true", help="also time the explanation (against the same recording)")
+    pr.set_defaults(fn=_profile)
     args = p.parse_args(argv)
     return args.fn(args)
 

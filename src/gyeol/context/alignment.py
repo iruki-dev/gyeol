@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..representation import ContextTokens
+from .tokens import ContextTokens
 from .korean import LARYNGEAL_CLASSES, SYLLABLE_POSITIONS, Syllable, is_hangul, lyrics_to_syllables
 
 

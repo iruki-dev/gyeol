@@ -1,0 +1,134 @@
+{
+  "_comment": "User-facing Korean strings for explanation items. Placeholders: {where} {value} {unit}; particles chosen from the final consonant of {where}: {i_ga} (이/가), {eun_neun} (은/는), {eul_reul} (을/를), {euro} (으로/로). Authored separately from code; coaches may edit. Extra placeholders: {label} {target} {user} (Korean names from 'labels').",
+  "category": {
+    "pitch": "음정",
+    "rhythm": "리듬",
+    "ornament": "꾸밈음",
+    "phonation": "발성",
+    "diction": "발음",
+    "dynamics": "강약"
+  },
+  "where": {
+    "note": "{syllable}",
+    "note_unknown": "{index}번째 음",
+    "phrase": "프레이즈 전체"
+  },
+  "attribute": {
+    "intonation_offset": {
+      "pos": "{where}{i_ga} 목표보다 {value}센트 높아요",
+      "neg": "{where}{i_ga} 목표보다 {value}센트 낮아요"
+    },
+    "global_offset": {
+      "pos": "{where}{i_ga} 전체적으로 {value}센트 높게 들려요",
+      "neg": "{where}{i_ga} 전체적으로 {value}센트 낮게 들려요"
+    },
+    "interval_compression": {
+      "pos": "음 사이의 간격(도약)을 목표보다 {value}% 넓게 불렀어요",
+      "neg": "음 사이의 간격(도약)을 목표보다 {value}% 좁게 불렀어요"
+    },
+    "onset_timing": {
+      "pos": "{where}{i_ga} {value}ms 늦게 들어갔어요",
+      "neg": "{where}{i_ga} {value}ms 일찍 들어갔어요"
+    },
+    "tempo": {
+      "pos": "{where}의 속도가 {value}% 빨라졌어요(서두름)",
+      "neg": "{where}의 속도가 {value}% 느려졌어요(끌림)"
+    },
+    "vibrato_extent": {
+      "pos": "{where}의 비브라토 폭이 {value}센트 더 넓어요",
+      "neg": "{where}의 비브라토 폭이 {value}센트 더 좁아요"
+    },
+    "vibrato_rate": {
+      "pos": "{where}의 비브라토가 초당 {value}회 더 빨라요",
+      "neg": "{where}의 비브라토가 초당 {value}회 더 느려요"
+    },
+    "scoop": {
+      "missing": "{where}에서 목표의 스쿱(아래에서 올려 잡기)이 빠졌어요",
+      "extra": "{where}에서 목표에 없는 스쿱(아래에서 올려 잡기)이 들어갔어요",
+      "different": "{where}의 스쿱 크기가 {value}센트 달라요"
+    },
+    "fall": {
+      "missing": "{where} 끝의 폴(내려 떨구기)이 빠졌어요",
+      "extra": "{where} 끝에 목표에 없는 폴(내려 떨구기)이 들어갔어요",
+      "different": "{where} 끝 폴의 크기가 {value}센트 달라요"
+    },
+    "kkeokki": {
+      "missing": "{where}의 꺾기가 빠졌어요",
+      "extra": "{where}에 목표에 없는 꺾기가 들어갔어요",
+      "different": "{where} 꺾기의 크기가 {value}센트 달라요"
+    },
+    "glide": {
+      "missing": "{where}{euro} 넘어가는 글라이드가 빠졌어요",
+      "extra": "{where}에 목표에 없는 글라이드가 들어갔어요",
+      "different": "{where} 글라이드 폭이 {value}센트 달라요"
+    },
+    "breathiness": {
+      "pos": "{where}에서 목표보다 숨소리가 {value}dB 더 섞였어요",
+      "neg": "{where}에서 목표보다 숨소리가 {value}dB 덜 섞였어요 (더 단단한 소리)"
+    },
+    "loudness": {
+      "pos": "{where}{i_ga} 목표보다 {value}dB 크게 들려요",
+      "neg": "{where}{i_ga} 목표보다 {value}dB 작게 들려요"
+    },
+    "dynamic_range": {
+      "pos": "강약의 폭이 목표보다 {value}dB 넓어요",
+      "neg": "강약의 폭이 목표보다 {value}dB 좁아요 (셈여림 변화가 적어요)"
+    },
+    "register": {
+      "different": "{where}에서 목표는 {target}에 가까운데, 지금은 {user}에 가깝게 들릴 수 있어요",
+      "same": "{where}의 소리 영역({target})은 목표와 비슷해 보여요"
+    },
+    "quality": {
+      "pos": "{where}에서 {label} 느낌이 목표보다 강하게 들릴 수 있어요",
+      "neg": "{where}에서 {label} 느낌이 목표보다 약하게 들릴 수 있어요"
+    },
+    "laryngeal": {
+      "pos": "{where}에서 {label} 자음이 목표 가수의 발음보다 세게 나는 편이에요",
+      "neg": "{where}에서 {label} 자음이 목표 가수의 발음보다 약하게 나는 편이에요"
+    },
+    "phone_match": {
+      "pos": "{where}의 발음이 목표 가수의 실제 발음과 {value}% 비슷해요"
+    }
+  },
+  "consistency": {
+    "style_or_habit": "여러 번 불러도 같은 방향이에요 (습관이나 스타일일 수 있어요)",
+    "error": "부를 때마다 달라요 (일시적인 실수일 수 있어요)",
+    "undetermined": "한 번만 불러서 습관인지 판단하기 어려워요"
+  },
+  "cannot_judge": {
+    "low_confidence": "{start}–{end}초 구간은 판단할 수 없어요 (음정이나 정렬 신뢰도가 낮아요)",
+    "remainder": "{start}–{end}초 구간은 목표와 다르게 들리지만, 무엇이 다른지 설명할 수 없어요",
+    "item_confidence": "{start}–{end}초 구간의 일부 항목은 신뢰도가 낮아 판단하지 않았어요"
+  },
+  "transposition": {
+    "octave_down": "한 옥타브 낮게 부른 것으로 보고 비교했어요",
+    "octave_up": "한 옥타브 높게 부른 것으로 보고 비교했어요",
+    "semitones": "{value}반음 옮겨 부른 것으로 보고 비교했어요"
+  },
+  "quality_flag": {
+    "clipping": "녹음이 찢어졌어요(클리핑). 입과 마이크 거리를 넓혀 주세요",
+    "low_snr": "주변 소음이 커서 일부 판단이 제한돼요",
+    "narrow_bandwidth": "녹음 대역이 좁아요(압축·통화 음질 등)",
+    "codec_suspected": "강한 압축 흔적이 있어요",
+    "bleed": "헤드폰 반주 소리가 마이크에 새어 들어갔어요",
+    "snr_unknown": "소음 수준을 측정하지 못했어요",
+    "bandwidth_unknown": "녹음 대역을 측정하지 못했어요"
+  },
+  "labels": {
+    "chest": "흉성(가슴 소리)",
+    "mixed": "믹스 보이스",
+    "falsetto": "가성",
+    "breathy": "숨 섞인 소리",
+    "pressed_belt": "누르는 소리(벨팅)",
+    "pharyngeal_twang": "트왱(밝게 모은 소리)",
+    "fry": "보컬 프라이",
+    "rough": "거친 소리",
+    "lenis": "예사소리(ㄱ·ㄷ·ㅂ·ㅈ)",
+    "aspirated": "거센소리(ㅋ·ㅌ·ㅍ·ㅊ)",
+    "fortis": "된소리(ㄲ·ㄸ·ㅃ·ㅉ)"
+  },
+  "audibility": {
+    "label": "들리는 차이",
+    "unavailable": "들리는 차이는 계산하지 않았어요 (본인 목소리 합성 동의가 필요해요)"
+  }
+}

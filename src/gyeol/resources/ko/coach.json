@@ -1,0 +1,71 @@
+{
+  "_comment": "User-facing Korean strings for gyeol.coach. Authored separately from code; coaches may edit. Never use labels such as '음치' or 'tone-deaf'.",
+  "self_assessment": {
+    "question": "방금 부른 것에서 스스로 느낀 점이 있나요? 해당하는 것을 모두 골라 주세요.",
+    "options": {
+      "pitch": "음정",
+      "rhythm": "리듬",
+      "ornament": "꾸밈음",
+      "dynamics": "강약",
+      "phonation": "발성",
+      "diction": "발음",
+      "nothing": "잘 모르겠어요"
+    },
+    "matched": "스스로 느낀 부분이 맞아요. 듣는 귀가 좋아지고 있어요.",
+    "missed": "좋은 관찰이에요. 이번에는 아래 부분을 먼저 들어 볼까요?",
+    "nothing": "괜찮아요. 이번에 들어 볼 부분은 이거예요."
+  },
+  "feedback": {
+    "primary": "먼저 들어 볼 부분",
+    "secondary": "더 보기",
+    "practice": "연습: {title} (약 {minutes}분) — {instructions}",
+    "none": "이번 녹음에서는 확실히 짚을 만한 차이를 찾지 못했어요.",
+    "withheld_fading": "이번에는 피드백 없이 스스로 들어 보세요. 안정적으로 잘 부르고 있어요.",
+    "tentative": "소리만으로는 확실하지 않아서 가능성으로 알려드려요.",
+    "thresholds_synthetic": "(합성 데이터로 맞춘 기준을 쓰고 있어요 — 시연용이에요)",
+    "attempt": "{n}번째 녹음"
+  },
+  "summary": {
+    "header": "{n}번 부른 결과를 정리했어요.",
+    "persistent": "자주 나온 부분: {text}",
+    "improved": "좋아진 부분: {text}",
+    "habit": "여러 번 같은 방향으로 나와서 습관일 수 있어요: {text}",
+    "none": "눈에 띄게 반복된 부분은 없었어요."
+  },
+  "health": {
+    "referral": "목이 아프거나 쉰 목소리가 2주 넘게 이어지면 이비인후과 전문의의 진료를 받아 보세요. 이 앱은 의료 진단을 하지 않아요.",
+    "phonation_session": "이번 연습에서 소리를 낸 시간이 꽤 길어졌어요. 물을 마시고 잠깐 쉬어 가요.",
+    "phonation_daily": "오늘 노래한 시간이 많아요. 오늘은 여기서 쉬어 주는 게 목에 좋아요.",
+    "fatigue_instability": "음이 조금씩 흔들리기 시작했어요. 목이 피곤할 수 있으니 쉬었다가 해요.",
+    "fatigue_top_range": "높은 음이 처음보다 덜 올라가요. 잠깐 쉬어 가는 게 좋아요.",
+    "fatigue_breath": "숨소리가 처음보다 많아졌어요. 목을 쉬게 해 주세요.",
+    "above_tessitura": "이 구간은 편한 음역보다 높아요.",
+    "below_tessitura": "이 구간은 편한 음역보다 낮아요.",
+    "out_of_range": "지금 음역 밖의 음이 있어요. 무리해서 내지 마세요.",
+    "transpose": "{direction} {semitones}반음 옮겨 부르는 것을 추천해요.",
+    "transpose_up": "위로",
+    "transpose_down": "아래로",
+    "octave": "편한 옥타브로 옮겨서 불러도 괜찮아요.",
+    "beginner_restricted": "이 부분은 목에 부담이 될 수 있어 지금 단계에서는 연습하지 않아요."
+  },
+  "onboarding": {
+    "production": {
+      "on_target": "음을 듣고 따라 부르는 것이 안정적이에요.",
+      "developing": "음을 듣고 따라 부르는 것은 연습하면서 좋아질 수 있어요."
+    },
+    "precision": {
+      "consistent": "같은 음을 여러 번 불러도 일정해요.",
+      "variable": "같은 음도 부를 때마다 조금씩 달라요. 천천히 맞춰 보는 연습이 도움이 돼요."
+    },
+    "perception": {
+      "fine": "두 음의 높낮이 차이를 잘 구분해요.",
+      "developing": "두 음을 비교해 듣는 연습을 함께 하면 도움이 돼요."
+    },
+    "routes": {
+      "own_voice_imitation": "내 목소리를 듣고 따라 하는 연습부터 시작해요.",
+      "wide_range_pitch_matching": "여러 높이의 음을 편하게 따라 불러 보는 연습을 해요.",
+      "perception_training": "귀로 음을 비교하는 연습도 함께 해요.",
+      "standard": "좋아하는 곡으로 바로 연습을 시작해도 좋아요."
+    }
+  }
+}
