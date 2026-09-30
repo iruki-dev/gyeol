@@ -5,6 +5,17 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M7 — discovery
+- TopK sparse autoencoder with AuxK dead-latent revival, deterministic training and per-latent statistics.
+- Matching of SAE latents to labels (AUROC) and to v0.1 DSP features (Spearman); novel-candidate list.
+- Conditional directions from aligned on/off pairs per f0 × loudness × vowel cell, with f0 and loudness regressed
+  out and per-singer statistics.
+- Transfer tests on held-out singers, pitch bands and languages at the unit level; a promotion rule and a
+  JSON-backed `PromotionRegistry` that refuses anything that did not pass.
+- Residual-energy monitor: slice z-scores against a baseline and a Theil–Sen trend, flagging coverage gaps.
+- `examples/discover_demo.py`: breathiness is rediscovered from frame-normalised log-mel shape, transfers to
+  unseen singers and pitch bands, and is promoted; a raw-pitch control is rejected.
+
 ### M6 — coaching policy
 - `gyeol.coach` (pure logic):
   - fitted display thresholds, where an item is shown only above max(MDC95, E95(confidence)), with provenance

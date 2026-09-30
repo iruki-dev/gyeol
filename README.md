@@ -32,7 +32,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M4 | encoders, acoustic model, source-filter vocoder, losses, leakage/benchmark harness (untrained: needs data + GPU) | done |
 | M5 | full explanation, audibility, consent-gated own-voice demos with AI labelling (DSP renderer; neural renderer needs M4 weights) | done |
 | M6 | coaching policy (fitted thresholds, priority, fading, self-assessment), onboarding, health guard, practice mapping | done |
-| M7 | discovery on the residual | planned |
+| M7 | discovery: TopK SAE, feature matching, conditional directions, transfer tests + promotion registry, residual monitor | done |
 | M8 | benchmarks, robustness, model cards, ONNX | planned |
 
 See `docs/milestones/`.
@@ -46,6 +46,8 @@ python examples/coach_demo_v2.py --synthetic --audibility --render-demo --out /t
 # coaching: fit display thresholds (synthetic knob recovery), then coach each take as an attempt
 python examples/fit_thresholds.py --synthetic --out /tmp/gyeol_demo/thresholds.json
 python examples/coach_demo_v2.py --synthetic --coach /tmp/gyeol_demo/thresholds.json --noticed pitch
+# discovery: SAE, conditional directions, transfer tests and promotion
+python examples/discover_demo.py --out /tmp/gyeol_discover
 ```
 
 ## Install
