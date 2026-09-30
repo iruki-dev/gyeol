@@ -44,23 +44,32 @@ class HarmonicSource(nn.Module):
         self.sr, self.hop, self.n_harmonics, self.noise_std, self.sine_amp = sr, hop, n_harmonics, noise_std, sine_amp
         self.merge = nn.Linear(n_harmonics + 1, 1)
 
-    def forward(self, f0: torch.Tensor, n_samples: int, rough: torch.Tensor | None = None, seed: int | None = None) -> torch.Tensor:
-        """f0 (B, T) Hz with 0 = unvoiced → excitation (B, 1, N)."""
+    def forward(self, f0: torch.Tensor, n_samples: int, rough: torch.Tensor | None = None, seed: int | None = None,
+                noise: tuple[torch.Tensor, torch.Tensor] | None = None) -> torch.Tensor:
+        """f0 (B, T) Hz with 0 = unvoiced → excitation (B, 1, N).
+
+        ``noise=(jitter, source)`` — two (B, N) standard-normal tensors — replaces
+        the internal draws (used for ONNX export, where the caller supplies them).
+        """
         gen = None
-        if seed is not None:
+        if seed is not None and noise is None:
             gen = torch.Generator(device=f0.device).manual_seed(seed)
         f0u = upsample_frames(f0, self.hop, n_samples)
         voiced = (f0u > 0).to(f0u.dtype)
         rough_u = upsample_frames(rough, self.hop, n_samples) if rough is not None else torch.zeros_like(f0u)
-        jitter = torch.randn(f0u.shape, generator=gen, device=f0.device) * 0.01 * rough_u
-        phase = 2 * math.pi * torch.cumsum(f0u * (1 + jitter) / self.sr, dim=1)
+        n_jit = noise[0] if noise is not None else torch.randn(f0u.shape, generator=gen, device=f0.device)
+        n_src = noise[1] if noise is not None else torch.randn(f0u.shape, generator=gen, device=f0.device)
+        jitter = n_jit * 0.01 * rough_u
+        # accumulate in float64 and wrap to [0, 2) cycles: float32 cumulative phase drifts on long audio
+        # (two cycles, so the ½-rate subharmonic below stays continuous)
+        cycles = torch.cumsum((f0u * (1 + jitter) / self.sr).double(), dim=1)
+        phase = (2 * math.pi * torch.remainder(cycles, 2.0)).to(f0u.dtype)
         k = torch.arange(1, self.n_harmonics + 1, device=f0.device, dtype=f0u.dtype)
         harm = torch.sin(phase[..., None] * k)  # (B, N, K)
         harm = harm * ((f0u[..., None] * k) < self.sr / 2).to(harm.dtype)
         sub = torch.sin(0.5 * phase)[..., None] * rough_u[..., None]  # subharmonic branch
         src = torch.cat([harm, sub], dim=-1) * self.sine_amp * voiced[..., None]
-        noise = torch.randn(f0u.shape, generator=gen, device=f0.device)[..., None]
-        noise = noise * (voiced[..., None] * self.noise_std + (1 - voiced[..., None]) * self.sine_amp / 3)
+        noise = n_src[..., None] * (voiced[..., None] * self.noise_std + (1 - voiced[..., None]) * self.sine_amp / 3)
         return torch.tanh(self.merge(src + noise)).transpose(1, 2)
 
 
@@ -126,7 +135,13 @@ class NSFVocoder(nn.Module):
                 seed: int | None = None) -> torch.Tensor:
         """mel (B, T, M), ap_db (B, T, A), f0_hz (B, T) → waveform (B, (T − 1)·hop)."""
         n = (mel.shape[1] - 1) * self.hop
-        src = self.source(f0_hz, n, rough, seed)  # (B, 1, n)
+        return self.harmonic_path(mel, ap_db, f0_hz, rough, seed) + self.noise(ap_db, n, seed)
+
+    def harmonic_path(self, mel: torch.Tensor, ap_db: torch.Tensor, f0_hz: torch.Tensor, rough: torch.Tensor | None = None,
+                      seed: int | None = None, source_noise: tuple[torch.Tensor, torch.Tensor] | None = None) -> torch.Tensor:
+        """Source-filter path without the aperiodic noise branch (deterministic given ``source_noise``)."""
+        n = (mel.shape[1] - 1) * self.hop
+        src = self.source(f0_hz, n, rough, seed, source_noise)  # (B, 1, n)
         x = self.pre(torch.cat([mel, ap_db], dim=-1).transpose(1, 2))
         for up, sc, blocks in zip(self.ups, self.src_convs, self.blocks):
             x = up(F.leaky_relu(x, 0.1))
@@ -135,5 +150,4 @@ class NSFVocoder(nn.Module):
             x = x[..., :L] + s[..., :L]
             x = sum(b(x) for b in blocks) / len(blocks)
         y = torch.tanh(self.post(F.leaky_relu(x, 0.1)))[:, 0]
-        y = F.pad(y, (0, max(0, n - y.shape[-1])))[:, :n]
-        return y + self.noise(ap_db, n, seed)
+        return F.pad(y, (0, max(0, n - y.shape[-1])))[:, :n]

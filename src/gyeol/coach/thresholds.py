@@ -91,6 +91,9 @@ def fit_attribute_threshold(attribute: str, retest_a: np.ndarray, retest_b: np.n
 class ThresholdSet:
     thresholds: dict[str, AttributeThreshold]
     provenance: dict = field(default_factory=dict)  # {"data": ..., "fitted_utc": ..., "synthetic": bool}
+    #: perceptual floor on the M5 audibility score, from a listening test
+    #: (:func:`gyeol.eval.listening.calibrate_audibility`); None = no listening data yet
+    audibility_floor: float | None = None
 
     def lookup(self, attribute: str) -> AttributeThreshold | None:
         if attribute in self.thresholds:
@@ -116,11 +119,14 @@ class ThresholdSet:
             return False, "no_difference"
         if abs(item.magnitude) < t.uncertainty(item.confidence):
             return False, "below_magnitude"
+        if self.audibility_floor is not None and item.audibility is not None and item.audibility < self.audibility_floor:
+            return False, "below_audibility"
         return True, "ok"
 
     def to_json(self, path: str | Path) -> Path:
         path = Path(path)
-        data = {"provenance": self.provenance, "thresholds": {k: asdict(v) for k, v in self.thresholds.items()}}
+        data = {"provenance": self.provenance, "audibility_floor": self.audibility_floor,
+                "thresholds": {k: asdict(v) for k, v in self.thresholds.items()}}
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=float), encoding="utf-8")
         return path
 
@@ -133,7 +139,7 @@ class ThresholdSet:
         for k, v in data["thresholds"].items():
             v = dict(v, conf_levels=tuple(v["conf_levels"]), error_bound=tuple(v["error_bound"]))
             out[k] = AttributeThreshold(**v)
-        return cls(out, data["provenance"])
+        return cls(out, data["provenance"], data.get("audibility_floor"))
 
     @classmethod
     def fitted(cls, thresholds: list[AttributeThreshold], data_description: str, synthetic: bool) -> "ThresholdSet":

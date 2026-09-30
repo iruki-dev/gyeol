@@ -2,6 +2,7 @@
 
     gyeol licenses                 list registered assets and their tags
     gyeol fetch <name> [--yes]     show the license, ask, then download
+    gyeol profile [wav]            per-stage latency of the analysis pipeline
 """
 
 from __future__ import annotations
@@ -62,6 +63,37 @@ def _fetch(args: argparse.Namespace, stdin=None) -> int:
     return 0
 
 
+def _profile(args: argparse.Namespace) -> int:
+    """Per-stage wall time of the signal-layer analysis (and explanation against itself)."""
+    from .export.latency import environment, pipeline_profile
+    from .pitch.adapters import PyinTracker, SHSTracker, YinTracker
+
+    if args.wav:
+        from .io import load_audio
+
+        x, sr = load_audio(args.wav)
+    else:
+        from .synth import SynthNote, melody
+
+        notes = [SynthNote(f, 0.6, gap_after=0.15) for f in (262, 294, 330, 349, 392, 330) * max(1, int(args.seconds // 4.5))]
+        m = melody(notes, sr=44100)
+        x, sr = m.audio, 44100
+    trackers = [PyinTracker(), YinTracker(), SHSTracker()] if args.dsp_only else None
+    target = None
+    if args.explain:
+        from .attributes.extract import analyze
+        from .core.consent import Provenance
+        from .core.containers import Recording
+
+        target = analyze(Recording(x, sr, Provenance.SYNTHETIC), trackers=trackers).unwrap()
+    prof = pipeline_profile(x, sr, target, trackers, n_runs=args.runs)
+    dur = prof.pop("audio_seconds")
+    print(f"audio {dur:.2f} s; environment {environment()}")
+    for k, v in sorted(prof.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:16s} {v * 1000:9.1f} ms   RTF {v / dur:6.3f}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gyeol", description="gyeol v2 — interpretable singing-voice model")
     p.add_argument("--version", action="version", version=f"gyeol {__version__}")
@@ -74,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
     f.add_argument("--yes", action="store_true", help="accept the shown license non-interactively")
     f.set_defaults(fn=_fetch)
+    pr = sub.add_parser("profile", help="per-stage latency of the analysis pipeline on this machine")
+    pr.add_argument("wav", nargs="?", help="audio file (default: a synthetic melody)")
+    pr.add_argument("--seconds", type=float, default=9.0, help="length of the synthetic melody")
+    pr.add_argument("--runs", type=int, default=3)
+    pr.add_argument("--dsp-only", action="store_true", help="use only gyeol's DSP pitch trackers")
+    pr.add_argument("--explain", action="store_true", help="also time the explanation (against the same recording)")
+    pr.set_defaults(fn=_profile)
     args = p.parse_args(argv)
     return args.fn(args)
 

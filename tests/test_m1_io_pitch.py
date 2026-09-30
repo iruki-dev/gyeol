@@ -105,7 +105,7 @@ def test_consensus_reports_tracker_failures():
 
 
 def test_neural_adapters_are_optional_and_license_gated():
-    with pytest.raises(NotImplementedError, match="M8"):
+    with pytest.raises(FileNotFoundError, match="gyeol fetch rmvpe"):  # reimplemented in M8; weights are never bundled
         RMVPETracker("weights.pt")
     for cls, pkg in ((SwiftF0Tracker, "swift_f0"), (FCPETracker, "torchfcpe")):
         tr = cls(Profile.COMMERCIAL)

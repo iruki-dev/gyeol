@@ -21,7 +21,7 @@ from ..attributes.heads import CalibratedHeads, FrameHeads, MahalanobisOOD, Task
 @dataclass
 class FrameExample:
     features: np.ndarray  # (T, D)
-    targets: dict[str, np.ndarray]  # softmax: (T,) int (−1 = ignore); sigmoid: (T, K) float with NaN = ignore
+    targets: dict[str, np.ndarray]  # softmax: (T,) int (−1 = ignore); sigmoid / regression: (T, K) float, NaN = ignore
     singer: str = ""
 
 
@@ -49,6 +49,12 @@ def _loss(logits: dict[str, torch.Tensor], ex: FrameExample, tasks: dict[str, Ta
             m = t >= 0
             if m.any():
                 total = total + w * F.cross_entropy(z[m], t[m])
+        elif spec.kind == "regression":
+            t = torch.tensor(np.asarray(tgt, float).reshape(len(tgt), spec.n), dtype=torch.float32)
+            m = ~torch.isnan(t)
+            if m.any():
+                mu, logvar = z[:, : spec.n], z[:, spec.n :].clamp(-12, 12)
+                total = total + w * F.gaussian_nll_loss(mu[m], t[m], logvar.exp()[m])
         else:
             t = torch.tensor(tgt, dtype=torch.float32)
             m = ~torch.isnan(t)
@@ -80,6 +86,22 @@ def train_heads(train: list[FrameExample], calib: list[FrameExample], tasks: dic
     with torch.no_grad():
         outs = [model(torch.tensor(ex.features, dtype=torch.float32)[None]) for ex in calib]
     for k, spec in tasks.items():
+        if spec.kind == "regression":  # variance scaling on held-out singers (Levi et al. 2019)
+            r2, sig = [], []
+            for (logits, _), ex in zip(outs, calib):
+                if k not in ex.targets:
+                    continue
+                t = np.asarray(ex.targets[k], float).reshape(len(ex.targets[k]), spec.n)
+                z = logits[k][0].numpy()
+                mu, var = z[:, : spec.n], np.exp(np.clip(z[:, spec.n :], -12, 12))
+                m = np.isfinite(t)
+                r2.append(((t - mu) ** 2 / var)[m])
+                sig.append(np.sqrt(var)[m])
+            if r2 and sum(len(v) for v in r2):
+                scale = float(np.mean(np.concatenate(r2)))
+                heads.variance_scale[k] = scale
+                heads.sigma_ref[k] = float(np.median(np.concatenate(sig)) * np.sqrt(scale))
+            continue
         zs, ts = [], []
         for (logits, _), ex in zip(outs, calib):
             if k not in ex.targets:

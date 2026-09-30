@@ -34,8 +34,17 @@ LARYNGEAL = ("lenis", "aspirated", "fortis")
 @dataclass
 class TaskSpec:
     n: int
-    kind: str  # "softmax" | "sigmoid"
+    kind: str  # "softmax" | "sigmoid" | "regression" (heteroscedastic Gaussian: mean and log-variance per target)
     labels: tuple[str, ...] = ()
+    unit: str = ""  # regression targets only
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("softmax", "sigmoid", "regression"):
+            raise ValueError(f"unknown task kind {self.kind!r}")
+
+    @property
+    def out_dim(self) -> int:
+        return 2 * self.n if self.kind == "regression" else self.n
 
 
 def default_tasks(n_phones: int = 0) -> dict[str, TaskSpec]:
@@ -57,7 +66,7 @@ class FrameHeads(nn.Module):
             nn.Conv1d(in_dim, hidden, kernel, padding=kernel // 2), nn.GELU(), nn.Dropout(dropout),
             nn.Conv1d(hidden, hidden, kernel, padding=kernel // 2), nn.GELU(),
         )
-        self.heads = nn.ModuleDict({k: nn.Linear(hidden, s.n) for k, s in tasks.items()})
+        self.heads = nn.ModuleDict({k: nn.Linear(hidden, s.out_dim) for k, s in tasks.items()})
 
     def forward(self, x: torch.Tensor) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """x: (B, T, D) → ({task: logits (B, T, n)}, embedding (B, T, H))."""
@@ -140,19 +149,33 @@ class CalibratedHeads:
 
     model: FrameHeads
     temperatures: dict[str, float] = field(default_factory=dict)
+    #: regression tasks: factor on the predicted variance fitted on held-out singers (NLL-optimal scaling)
+    variance_scale: dict[str, float] = field(default_factory=dict)
+    #: regression tasks: median calibrated σ on held-out singers (σ at which confidence = 0.5)
+    sigma_ref: dict[str, float] = field(default_factory=dict)
     ood: MahalanobisOOD | None = None  # on the penultimate embedding
     input_ood: MahalanobisOOD | None = None  # on the raw input features
     feature_name: str = "dsp"
 
     @torch.no_grad()
     def predict(self, feats: np.ndarray) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
-        """(probabilities per task, unknown mask, embedding) for (T, D) features."""
+        """(outputs per task, unknown mask, embedding) for (T, D) features.
+
+        Classification tasks give probabilities (T, n); regression tasks give
+        ``[mean (T, n) | calibrated σ (T, n)]`` concatenated to (T, 2n).
+        """
         self.model.eval()
         logits, emb = self.model(torch.tensor(feats, dtype=torch.float32)[None])
         probs = {}
         for k, z in logits.items():
+            spec = self.model.tasks[k]
+            if spec.kind == "regression":
+                mu, logvar = z[0][:, : spec.n], z[0][:, spec.n :]
+                sigma = (logvar.exp() * self.variance_scale.get(k, 1.0)).sqrt()
+                probs[k] = torch.cat([mu, sigma], -1).numpy()
+                continue
             z = z[0] / self.temperatures.get(k, 1.0)
-            probs[k] = (z.softmax(-1) if self.model.tasks[k].kind == "softmax" else z.sigmoid()).numpy()
+            probs[k] = (z.softmax(-1) if spec.kind == "softmax" else z.sigmoid()).numpy()
         e = emb[0].numpy()
         unknown = np.zeros(len(e), bool)
         if self.ood is not None:
@@ -169,6 +192,16 @@ class CalibratedHeads:
         out = {}
         for k, p in probs.items():
             spec = self.model.tasks[k]
+            if spec.kind == "regression":
+                mu, sigma = p[:, : spec.n], p[:, spec.n :]
+                ref = self.sigma_ref.get(k, float(np.median(sigma)))
+                c = (ref / (ref + sigma.mean(axis=1))) * q * ~unknown
+                vals = (mu[:, 0] if spec.n == 1 else mu).copy()
+                vals[unknown] = np.nan
+                out[k] = AttributeCurve(k, vals, c, grid, spec.unit, labels=spec.labels if spec.n > 1 else (),
+                                        meta={"calibrated": k in self.variance_scale, "features": self.feature_name,
+                                              "sigma": sigma, "unknown_fraction": float(unknown.mean())})
+                continue
             peak = p.max(axis=1) if spec.kind == "softmax" else np.abs(p - 0.5).max(axis=1) * 2
             conf = peak * q * ~unknown * (v if k in ("register", "phonation") else 1.0)
             vals = p.copy()

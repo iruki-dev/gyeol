@@ -18,6 +18,7 @@ ssl = []                 # SSL encoders are loaded from locally fetched checkpoi
 korean = ["g2pk"]
 train = ["omegaconf>=2.3"]
 dev = ["pytest>=7", "ruff>=0.4"]
+onnx = ["onnx>=1.16", "onnxscript>=0.2", "onnxruntime>=1.17"]   # Apache-2.0 / MIT / MIT: server export (M8)
 
 [project.scripts]
 gyeol = "gyeol.cli:main"

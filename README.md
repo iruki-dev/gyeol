@@ -33,7 +33,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M5 | full explanation, audibility, consent-gated own-voice demos with AI labelling (DSP renderer; neural renderer needs M4 weights) | done |
 | M6 | coaching policy (fitted thresholds, priority, fading, self-assessment), onboarding, health guard, practice mapping | done |
 | M7 | discovery: TopK SAE, feature matching, conditional directions, transfer tests + promotion registry, residual monitor | done |
-| M8 | benchmarks, robustness, model cards, ONNX | planned |
+| M8 | RMVPE reimplementation, regression heads, robustness grid, expert-benchmark adapter + agreement/retention protocols, listening calibration, model cards, ONNX export + latency profile | done |
 
 See `docs/milestones/`.
 
@@ -48,13 +48,16 @@ python examples/fit_thresholds.py --synthetic --out /tmp/gyeol_demo/thresholds.j
 python examples/coach_demo_v2.py --synthetic --coach /tmp/gyeol_demo/thresholds.json --noticed pitch
 # discovery: SAE, conditional directions, transfer tests and promotion
 python examples/discover_demo.py --out /tmp/gyeol_discover
+# evaluation and hardening: robustness grid, ONNX export + latency, model card (needs the [onnx] extra)
+python examples/evaluate_and_export.py --out /tmp/gyeol_m8
+gyeol profile --dsp-only --explain
 ```
 
 ## Install
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # or a CUDA build
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # add ",onnx" for ONNX export
 pytest
 ```
 

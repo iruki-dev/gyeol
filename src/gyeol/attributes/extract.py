@@ -18,6 +18,7 @@ the per-frame SNR factor, and clipping zeroes aperiodicity confidence.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -64,6 +65,13 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
         return Result.failure("recording is silent or contains NaN/inf")
     grid = FrameGrid.for_samples(len(x), sr, cfg.hop)
     xc = x - np.mean(x)
+    timings: dict[str, float] = {}
+    clock = [time.perf_counter()]
+
+    def lap(stage: str) -> None:
+        now = time.perf_counter()
+        timings[stage] = now - clock[0]
+        clock[0] = now
 
     pr = consensus(xc, sr, grid, list(trackers) if trackers else default_trackers(cfg.profile), cfg.consensus)
     if not pr.usable:
@@ -73,7 +81,9 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     if voiced.sum() < 5:
         return Result.failure("no voiced frames: nothing sung was detected")
 
+    lap("pitch")
     q = assess(x, sr, grid, voiced, backing=backing, policy=cfg.quality)
+    lap("quality")
     ff = q.frame_factor if q.frame_factor is not None else np.ones(grid.n_frames)
     clip_ok = 0.0 if "clipping" in q.flags else 1.0
 
@@ -88,7 +98,9 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     add("loudness", loud, ff * (loud > -90), "dBFS(A)")
     add("loudness_rel", relative_loudness(loud, voiced), np.where(voiced, ff, 0.0), "dB re median voiced")
 
+    lap("loudness")
     per, ape, meas = harmonic_noise(xc, sr, grid, p.f0_hz)
+    lap("harmonic_noise")
     hn_conf = p.f0_conf * ff * meas * clip_ok
     add("periodic_db", per, hn_conf, "dB")
     add("aperiodic_db", ape, hn_conf, "dB")
@@ -101,10 +113,13 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     add("vibrato_rate", rate, vconf, "Hz")
     add("vibrato_extent", extent, vconf, "cents")
 
+    lap("pitch_curves")
     feats = (content or MFCCContent()).extract(xc, sr, grid)
+    lap("content")
     add("content", feats, np.ones(grid.n_frames), "normalised", labels=tuple(f"c{i}" for i in range(feats.shape[1])))
 
     events = detect_events(cents, center, voiced, p.f0_conf, vconf, notes, grid, cfg.events)
+    lap("events")
     rep = Representation(
         grid=grid, curves=curves, recording_id=recording.recording_id, provenance=recording.provenance, events=events,
         quality={"flags": dict(q.flags), "snr_db": None if q.snr is None else q.snr.snr_db,
@@ -121,6 +136,8 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
                 rep.curves.add(c)
         else:
             warnings.append(f"learned heads skipped: {lr.reason}")
+        lap("learned_heads")
+    rep.meta["timings_s"] = timings
     return Result(pr.status, rep, "", warnings)
 
 

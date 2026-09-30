@@ -34,6 +34,18 @@ A template to fill in before running a test. Pre-register it, including the marg
   on the originals, within a pre-registered TOST margin.
 - **ABX:** discrimination of ±1 breathiness step, original vs resynthesised.
 
-## 3. Reporting
+## 3. Audibility calibration (M8: perceptual floor for the coach)
+- **Question:** above which M5 audibility score do listeners hear that one explanation item has been corrected?
+- **Stimuli:** for items sampled across attributes and magnitudes, the unedited render and the render with only
+  that item corrected (`score_audibility`'s own pair; same renderer, same seed).
+- **Task:** 2-interval forced choice ("which one differs from the reference?"), or same/different with catch
+  trials; ≥ 12 listeners, balanced order, and the item's audibility score recorded per trial.
+- **Analysis:** `gyeol.eval.listening.calibrate_audibility(scores, detected, listeners)` fits an isotonic
+  detection-rate curve and returns the score at 75 % detection (the 2AFC midpoint). Put it into
+  `ThresholdSet.audibility_floor`; the provenance must name the test.
+- **Per attribute:** repeat the fit per category (pitch, rhythm, ornament, dynamics, phonation). One pooled floor
+  can hide category differences in how the metric maps to perception.
+
+## 4. Reporting
 - Report every metric by technique and consonant class. Never report a single pooled number only.
 - Record audio settings, playback device, room and listener hearing screening.

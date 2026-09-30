@@ -5,6 +5,29 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M8 — evaluation and hardening
+- RMVPE reimplemented (reference module layout, strict key-by-key weight loading, chunked tracker in the
+  consensus); weights are never bundled or downloaded.
+- Regression heads: heteroscedastic Gaussian with held-out variance scaling; promoted continuous attributes train
+  as heads.
+- Robustness grid: noise, reverb, band-limit, codecs, separation artefacts, Bluetooth and bleed. ICC, MDC95, bias,
+  per-condition |Δ|, item presence and operating thresholds for curves and explanation items.
+- Expert-benchmark adapter (VocalCoachBench, research profile only; field-mapped loader; top-k label and segment
+  scoring against a label-prior baseline); Fleiss'/Cohen's κ and coach-agreement analysis; protocols for coach
+  agreement, the retention study and audibility calibration.
+- Listening calibration of the audibility score and an optional perceptual floor (`ThresholdSet.audibility_floor`).
+- Model cards built from checkpoint license lineage, with validation.
+- ONNX export (opset 18, dynamo exporter, dynamic batch/time, ORT parity check at a second shape, provenance
+  sidecar) for heads, RMVPE, acoustic model, vocoder harmonic path and singer encoder; latency profiles;
+  per-stage analysis timings; `gyeol profile`; `[onnx]` extra (also installed in CI).
+- Fixes:
+  - Bluetooth augmentation no longer shifts pitch (piecewise-constant re-sync delays plus ppm drift instead of a
+    resampled wandering delay).
+  - Vocoder phase is accumulated in float64 and wrapped.
+  - The invariance report ignores conditions where a dimension was never measured instead of dropping the
+    dimension.
+- `gyeol_synthetic` registry entry; `examples/evaluate_and_export.py`.
+
 ### M7 — discovery
 - TopK sparse autoencoder with AuxK dead-latent revival, deterministic training and per-latent statistics.
 - Matching of SAE latents to labels (AUROC) and to v0.1 DSP features (Spearman); novel-candidate list.

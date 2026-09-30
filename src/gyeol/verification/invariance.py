@@ -53,6 +53,9 @@ class DimensionReport:
     bias_vs_reference: dict[str, float]
     loa_vs_reference: dict[str, tuple[float, float]]
     accepted: bool
+    #: conditions entering the ICC; a condition where the dimension was never measured (e.g. an explanation
+    #: item withheld as "cannot judge" under heavy noise) is left out instead of discarding every subject
+    conditions_used: list[str] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,7 +71,12 @@ def invariance_report(records: list[Record], reference: str, min_icc: float = 0.
     table = {(r.singer, r.condition): r.values for r in records}
     out: dict[str, DimensionReport] = {}
     for d in dims:
-        y = np.array([[table.get((s, c), {}).get(d, np.nan) for c in conditions] for s in singers])
+        y_all = np.array([[table.get((s, c), {}).get(d, np.nan) for c in conditions] for s in singers])
+        measured = ~np.all(np.isnan(y_all), axis=0)
+        if not measured[0]:
+            continue  # never measured in the reference condition
+        used = [c for c, m in zip(conditions, measured) if m]
+        y = y_all[:, measured]
         complete = ~np.isnan(y).any(axis=1)
         yc = y[complete]
         if len(yc) < 3:
@@ -82,10 +90,10 @@ def invariance_report(records: list[Record], reference: str, min_icc: float = 0.
         flat_s = np.repeat(np.arange(len(yc)), yc.shape[1])
         wb = within_between_ratio(flat_v, flat_s)
         bias, loa = {}, {}
-        for j, c in enumerate(conditions[1:], start=1):
+        for j, c in enumerate(used[1:], start=1):
             ba = bland_altman(yc[:, 0], yc[:, j])
             bias[c] = ba.bias
             loa[c] = (ba.loa_low, ba.loa_high)
         accepted = bool(val >= min_icc and all(abs(b) < m for b in bias.values()))
-        out[d] = DimensionReport(d, int(len(yc)), val, ci, koo_li(val), sd, s, m, wb, bias, loa, accepted)
+        out[d] = DimensionReport(d, int(len(yc)), val, ci, koo_li(val), sd, s, m, wb, bias, loa, accepted, used)
     return out

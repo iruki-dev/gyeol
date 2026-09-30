@@ -226,9 +226,9 @@ def test_continuous_target_promotion():
     assert d.kind == "continuous" and d.passed
     from gyeol.discover.transfer import PromotedAttribute
 
-    pa = PromotedAttribute("level", "continuous", {}, [1.0], 0.0, [0.0], [1.0], {}, "now")
-    with pytest.raises(NotImplementedError, match="M8"):
-        pa.task_spec()
+    pa = PromotedAttribute("level", "continuous", {"unit": "dB"}, [1.0], 0.0, [0.0], [1.0], {}, "now")
+    spec = pa.task_spec()  # regression head (M8)
+    assert spec.kind == "regression" and spec.n == 1 and spec.unit == "dB" and spec.out_dim == 2
 
 
 # ================================================================ residual monitor

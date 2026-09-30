@@ -4,8 +4,8 @@
   ported from v0.1 (:mod:`gyeol.pitch.dsp_trackers`).
 * :class:`SwiftF0Tracker` – the ``swift-f0`` package (MIT, bundled ONNX).
 * :class:`FCPETracker` – the ``torchfcpe`` package (MIT, bundled weights).
-* :class:`RMVPETracker` – not implemented yet (needs a reimplementation that
-  loads self-fetched Apache-2.0 weights).
+* :class:`~gyeol.pitch.rmvpe.RMVPETracker` – gyeol's reimplementation of
+  RMVPE (M8); loads Apache-2.0 weights the user fetched with ``gyeol fetch rmvpe``.
 
 Neural adapters check the license registry under the active profile when
 constructed and return ``Status.UNAVAILABLE`` if their package is missing.
@@ -124,24 +124,11 @@ class FCPETracker:
         return Result.success(PitchTrack(self.name, times, np.where(voiced, f0, np.nan), voiced.astype(float)))
 
 
-class RMVPETracker:
-    name = "rmvpe"
-    asset = "rmvpe"
+def default_trackers(profile: Profile = Profile.COMMERCIAL, rmvpe_weights: str | None = None) -> list:
+    """Neural trackers when installed (RMVPE when fetched weights are given), padded with DSP trackers to at least three."""
+    from .rmvpe import RMVPETracker
 
-    def __init__(self, weights_path: str, profile: Profile = Profile.COMMERCIAL):
-        require_allowed(lookup(self.asset), profile, announce=False)
-        raise NotImplementedError(
-            "TODO(M8): reimplement the RMVPE network and verify it against weights fetched with `gyeol fetch rmvpe`; "
-            "until then use SwiftF0Tracker / FCPETracker / DSP trackers"
-        )
-
-    def track(self, audio: np.ndarray, sr: int) -> Result[PitchTrack]:  # pragma: no cover
-        raise NotImplementedError("TODO(M8)")
-
-
-def default_trackers(profile: Profile = Profile.COMMERCIAL) -> list:
-    """Neural trackers when installed, padded with DSP trackers to at least three."""
-    out: list = []
+    out: list = [RMVPETracker(rmvpe_weights, profile)] if rmvpe_weights else []
     for cls in (SwiftF0Tracker, FCPETracker):
         pkg = "swift_f0" if cls is SwiftF0Tracker else "torchfcpe"
         try:
@@ -154,3 +141,11 @@ def default_trackers(profile: Profile = Profile.COMMERCIAL) -> list:
             break
         out.append(mk())
     return out
+
+
+def __getattr__(name: str):  # RMVPETracker lives in gyeol.pitch.rmvpe (M8); keep the old import path working
+    if name == "RMVPETracker":
+        from .rmvpe import RMVPETracker
+
+        return RMVPETracker
+    raise AttributeError(name)

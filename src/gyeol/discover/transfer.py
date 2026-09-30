@@ -246,9 +246,9 @@ class PromotedAttribute:
         """Head spec for training the promoted attribute as an M3 head."""
         from ..attributes.heads import TaskSpec
 
-        if self.kind != "binary":
-            raise NotImplementedError("TODO(M8): regression heads for continuous promoted attributes")
-        return TaskSpec(1, "sigmoid", (self.name,))
+        if self.kind == "binary":
+            return TaskSpec(1, "sigmoid", (self.name,))
+        return TaskSpec(1, "regression", (self.name,), unit=str(self.source.get("unit", "")))
 
 
 class PromotionRegistry:

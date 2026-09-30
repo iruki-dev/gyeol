@@ -157,21 +157,36 @@ def separation_artifacts(x: np.ndarray, sr: int, rng: np.random.Generator, accom
 
 def bluetooth_jitter(x: np.ndarray, sr: int, rng: np.random.Generator, base_latency_s=(0.1, 0.3), wander_ms=(5.0, 40.0),
                      loss_rate=(0.0, 0.02)) -> tuple[np.ndarray, Labels]:
-    """Constant route latency + slowly wandering delay + packet loss (10 ms frames)."""
+    """Constant route latency + delay jumps at buffer re-syncs + clock drift + packet loss (10 ms packets).
+
+    Bluetooth jitter is absorbed by the receive buffer; what reaches the app
+    is a delay that *jumps* when the buffer re-synchronises (samples dropped or
+    repeated at a packet boundary), plus a clock mismatch of tens of ppm.  The
+    delay is therefore piecewise constant (re-syncs every 1–3 s, each within
+    ±wander of the base latency).  A smoothly varying delay would resample the
+    audio and shift its pitch (a 40 ms wander over a few seconds ≈ 100 cents),
+    which real routes do not do; the drift here changes pitch by < 0.1 cent.
+    """
     n = len(x)
     lat = float(rng.uniform(*base_latency_s))
     wander = float(rng.uniform(*wander_ms)) / 1000.0
-    period = float(rng.uniform(2.0, 8.0))
-    t = np.arange(n) / sr
-    delay = lat + wander * np.sin(2 * np.pi * t / period + rng.uniform(0, 2 * np.pi))
-    src = t - delay
-    y = np.interp(src, t, x, left=0.0, right=0.0)
-    p = float(rng.uniform(*loss_rate))
     pkt = int(0.01 * sr)
+    drift = float(rng.uniform(-50e-6, 50e-6))
+    t = np.arange(n) / sr
+    xs = np.interp(t * (1.0 + drift), t, x, left=0.0, right=0.0) if drift else np.asarray(x, float)
+    delay = np.full(n, lat)
+    start = 0
+    while start < n:  # re-sync events on packet boundaries
+        length = int(rng.uniform(1.0, 3.0) * sr) // pkt * pkt
+        delay[start : start + length] = lat + (rng.uniform(-wander, wander) if wander > 0 else 0.0)
+        start += max(length, pkt)
+    src = np.arange(n) - np.round(delay * sr).astype(int)
+    y = np.where((src >= 0) & (src < n), xs[np.clip(src, 0, n - 1)], 0.0)
+    p = float(rng.uniform(*loss_rate))
     lost = rng.random(n // pkt + 1) < p
     for i in np.flatnonzero(lost):
         y[i * pkt : (i + 1) * pkt] = 0.0
-    return y, {"bt_latency_s": lat, "bt_wander_s": wander, "bt_loss_rate": p}
+    return y, {"bt_latency_s": lat, "bt_wander_s": wander, "bt_loss_rate": p, "bt_drift_ppm": drift * 1e6}
 
 
 # ---------------------------------------------------------------------------
