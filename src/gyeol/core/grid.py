@@ -80,3 +80,56 @@ class FrameGrid:
     def check_array(self, a: np.ndarray, name: str = "array") -> None:
         if a.shape[0] != self.n_frames:
             raise GridMismatchError(f"{name} has {a.shape[0]} frames, grid has {self.n_frames}")
+
+
+def project(src_times: np.ndarray, values: np.ndarray, grid: FrameGrid, *, kind: str = "linear", max_gap: float | None = None) -> np.ndarray:
+    """Project a curve sampled at ``src_times`` (seconds) onto ``grid``.
+
+    ``values`` is (N,) or (N, D).  NaN source samples are not bridged:
+    ``kind="linear"`` interpolates only between finite neighbours that are at
+    most ``max_gap`` seconds apart (default: 2 source periods); other grid
+    frames get NaN.  ``kind="nearest"`` takes the nearest source sample.
+    This is the only sanctioned way for an estimator with its own hop to put
+    results on the shared grid.
+    """
+    src_times = np.asarray(src_times, dtype=float)
+    v = np.asarray(values, dtype=float)
+    t = grid.times()
+    if v.ndim == 1:
+        return _project_1d(src_times, v, t, kind, max_gap)
+    return np.stack([_project_1d(src_times, v[:, j], t, kind, max_gap) for j in range(v.shape[1])], axis=1)
+
+
+def _project_1d(ts: np.ndarray, v: np.ndarray, t: np.ndarray, kind: str, max_gap: float | None) -> np.ndarray:
+    out = np.full(len(t), np.nan)
+    if len(ts) == 0:
+        return out
+    step = float(np.median(np.diff(ts))) if len(ts) > 1 else 1.0
+    gap = 2.0 * step if max_gap is None else max_gap
+    if kind == "nearest":
+        idx = np.clip(np.searchsorted(ts, t), 1, len(ts) - 1) if len(ts) > 1 else np.zeros(len(t), int)
+        if len(ts) > 1:
+            left = idx - 1
+            idx = np.where(np.abs(t - ts[left]) <= np.abs(ts[idx] - t), left, idx)
+        near = np.abs(ts[idx] - t) <= gap
+        out[near] = v[idx][near]
+        return out
+    if kind != "linear":
+        raise ValueError(f"unknown kind {kind!r}")
+    ok = np.isfinite(v)
+    if ok.sum() == 0:
+        return out
+    tf, vf = ts[ok], v[ok]
+    j = np.searchsorted(tf, t)
+    lo = np.clip(j - 1, 0, len(tf) - 1)
+    hi = np.clip(j, 0, len(tf) - 1)
+    exact = np.abs(tf[lo] - t) < 1e-9
+    span = tf[hi] - tf[lo]
+    w = np.where(span > 0, (t - tf[lo]) / np.where(span > 0, span, 1.0), 0.0)
+    inside = (t >= tf[lo] - 1e-9) & (t <= tf[hi] + 1e-9) & (span <= gap)
+    val = vf[lo] + np.clip(w, 0, 1) * (vf[hi] - vf[lo])
+    # at the ends of a finite run, hold the edge value for half a source step
+    edge = (lo == hi) & (np.abs(t - tf[lo]) <= 0.5 * step + 1e-9)
+    sel = inside | exact | edge
+    out[sel] = val[sel]
+    return out

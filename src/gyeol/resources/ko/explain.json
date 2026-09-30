@@ -1,0 +1,86 @@
+{
+  "_comment": "User-facing Korean strings for explanation items. Placeholders: {where} {value} {unit}; particles chosen from the final consonant of {where}: {i_ga} (이/가), {eun_neun} (은/는), {eul_reul} (을/를), {euro} (으로/로). Authored separately from code; coaches may edit.",
+  "category": {
+    "pitch": "음정",
+    "rhythm": "리듬",
+    "ornament": "꾸밈음",
+    "phonation": "발성",
+    "diction": "발음"
+  },
+  "where": {
+    "note": "{syllable}",
+    "note_unknown": "{index}번째 음",
+    "phrase": "프레이즈 전체"
+  },
+  "attribute": {
+    "intonation_offset": {
+      "pos": "{where}{i_ga} 목표보다 {value}센트 높아요",
+      "neg": "{where}{i_ga} 목표보다 {value}센트 낮아요"
+    },
+    "global_offset": {
+      "pos": "{where}{i_ga} 전체적으로 {value}센트 높게 들려요",
+      "neg": "{where}{i_ga} 전체적으로 {value}센트 낮게 들려요"
+    },
+    "interval_compression": {
+      "pos": "음 사이의 간격(도약)을 목표보다 {value}% 넓게 불렀어요",
+      "neg": "음 사이의 간격(도약)을 목표보다 {value}% 좁게 불렀어요"
+    },
+    "onset_timing": {
+      "pos": "{where}{i_ga} {value}ms 늦게 들어갔어요",
+      "neg": "{where}{i_ga} {value}ms 일찍 들어갔어요"
+    },
+    "tempo": {
+      "pos": "{where}의 속도가 {value}% 빨라졌어요(서두름)",
+      "neg": "{where}의 속도가 {value}% 느려졌어요(끌림)"
+    },
+    "vibrato_extent": {
+      "pos": "{where}의 비브라토 폭이 {value}센트 더 넓어요",
+      "neg": "{where}의 비브라토 폭이 {value}센트 더 좁아요"
+    },
+    "vibrato_rate": {
+      "pos": "{where}의 비브라토가 초당 {value}회 더 빨라요",
+      "neg": "{where}의 비브라토가 초당 {value}회 더 느려요"
+    },
+    "scoop": {
+      "missing": "{where}에서 목표의 스쿱(아래에서 올려 잡기)이 빠졌어요",
+      "extra": "{where}에서 목표에 없는 스쿱(아래에서 올려 잡기)이 들어갔어요",
+      "different": "{where}의 스쿱 크기가 {value}센트 달라요"
+    },
+    "fall": {
+      "missing": "{where} 끝의 폴(내려 떨구기)이 빠졌어요",
+      "extra": "{where} 끝에 목표에 없는 폴(내려 떨구기)이 들어갔어요",
+      "different": "{where} 끝 폴의 크기가 {value}센트 달라요"
+    },
+    "kkeokki": {
+      "missing": "{where}의 꺾기가 빠졌어요",
+      "extra": "{where}에 목표에 없는 꺾기가 들어갔어요",
+      "different": "{where} 꺾기의 크기가 {value}센트 달라요"
+    },
+    "glide": {
+      "missing": "{where}{euro} 넘어가는 글라이드가 빠졌어요",
+      "extra": "{where}에 목표에 없는 글라이드가 들어갔어요",
+      "different": "{where} 글라이드 폭이 {value}센트 달라요"
+    }
+  },
+  "consistency": {
+    "style_or_habit": "여러 번 불러도 같은 방향이에요 (습관이나 스타일일 수 있어요)",
+    "error": "부를 때마다 달라요 (일시적인 실수일 수 있어요)",
+    "undetermined": "한 번만 불러서 습관인지 판단하기 어려워요"
+  },
+  "cannot_judge": "{start}–{end}초 구간은 판단할 수 없어요 (음정이나 정렬 신뢰도가 낮아요)",
+  "transposition": {
+    "octave_down": "한 옥타브 낮게 부른 것으로 보고 비교했어요",
+    "octave_up": "한 옥타브 높게 부른 것으로 보고 비교했어요",
+    "semitones": "{value}반음 옮겨 부른 것으로 보고 비교했어요"
+  },
+  "quality_flag": {
+    "clipping": "녹음이 찢어졌어요(클리핑). 입과 마이크 거리를 넓혀 주세요",
+    "low_snr": "주변 소음이 커서 일부 판단이 제한돼요",
+    "narrow_bandwidth": "녹음 대역이 좁아요(압축·통화 음질 등)",
+    "codec_suspected": "강한 압축 흔적이 있어요",
+    "bleed": "헤드폰 반주 소리가 마이크에 새어 들어갔어요",
+    "snr_unknown": "소음 수준을 측정하지 못했어요",
+    "bandwidth_unknown": "녹음 대역을 측정하지 못했어요"
+  },
+  "audibility_pending": "들리는 정도(가청도) 점수는 아직 계산하지 않아요 (M5)"
+}

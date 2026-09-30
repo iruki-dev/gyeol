@@ -26,7 +26,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | | Scope | Status |
 |---|---|---|
 | M0 | skeleton, `FrameGrid`, containers, license enforcement, consent types, store, verification toolkit, CI | done |
-| M1 | signal layer: IO, latency, quality checks, pitch consensus, loudness/aperiodicity, pitch-derived curves, alignment, pitch/rhythm/ornament explanations, demo CLI | in progress |
+| M1 | signal layer: IO, latency, quality checks, pitch consensus, loudness/aperiodicity, pitch-derived curves, alignment, pitch/rhythm/ornament explanations, demo CLI | done |
 | M2 | dataset adapters, augmentation, paired loader | planned |
 | M3 | phonation/register/diction heads, calibration, probing | planned |
 | M4 | encoders, acoustic model, self-trained source-filter vocoder | planned |
@@ -36,6 +36,12 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M8 | benchmarks, robustness, model cards, ONNX | planned |
 
 See `docs/milestones/`.
+
+## Try it
+
+```bash
+python examples/coach_demo_v2.py --synthetic --out /tmp/gyeol_demo
+```
 
 ## Install
 

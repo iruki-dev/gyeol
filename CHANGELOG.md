@@ -5,6 +5,18 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M1 — signal layer
+- IO: BS.1770 loudness, A-weighting, and latency calibration (loopback, tap-along, offline refinement).
+- Frontend: raw-input clipping, SNR, channel bandwidth and codec cliff, backing-track bleed, T60 with status, and
+  separation adapters.
+- Pitch: tracker protocol, DSP trackers, optional SwiftF0/FCPE adapters, and an octave-aware consensus.
+- Attribute curves (pitch centre, vibrato, loudness, periodic/aperiodic, subharmonics, content) and ornament events
+  (scoop, fall, 꺾기, glide).
+- Content-only banded DTW alignment and an explanation layer for pitch/rhythm/ornaments, with take consistency and
+  "cannot judge".
+- Korean resource strings and `examples/coach_demo_v2.py`.
+- Regression tests for the eight v0.1 defects, all fixed.
+
 ### M0 — skeleton
 - New package layout, `FrameGrid`, `Result`/`Status` and typed containers.
 - `LicenseTag`/`Profile` registry, enforced in the dataset-manifest and checkpoint loaders.
