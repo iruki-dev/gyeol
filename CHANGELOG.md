@@ -5,6 +5,26 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M5 — full explanation and demo
+- Explanation items for phonation (breathiness from the aperiodic ratio; tentative register and phonation-quality
+  items from learned heads), dynamics (per-note loudness, phrase dynamic range) and phrase-level diction against the
+  target singer's own realisation (laryngeal contrast, phone match).
+- "Cannot judge" spans carry a reason: low confidence, low item confidence, or an unexplained residual remainder.
+- `gyeol.demo`:
+  - edits of the user's c(t) for every item kind, with scaling and composition;
+  - feasible-range clamping (from onboarding or the user's own takes);
+  - stepwise schedule (the selected item first, then partial steps toward the target style);
+  - a harmonic-plus-noise DSP renderer and an M4 neural renderer. Both refuse anything but a `ConsentedVoice` and
+    the same user's own take.
+- AI labelling: every rendered waveform is watermarked through a pluggable hook (default: documented
+  spread-spectrum mark with a detector) and carries AI-generated metadata (WAV INFO tags plus a JSON sidecar; user
+  id stored only as a hash).
+- Audibility per item: render with only that item corrected, then take an uncalibrated specific-loudness distance
+  to the unedited render.
+- `ltas_singer_vector`: a DSP timbre descriptor, so DSP rendering is consent-gated before a singer encoder is trained.
+- Korean strings for the new categories and attributes and for the demo notices; the example gains `--audibility`
+  and `--render-demo`.
+
 ### M4 — autoencoder
 - Grid-aligned log-mel.
 - Singer encoder (SupCon, provenance-carrying `SingerVector`), env encoder with augmentation-label heads, and a VIB

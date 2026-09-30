@@ -1,4 +1,4 @@
-"""Explain a user take as the target transformed by τ(t) and Δc(t) (M1: pitch, rhythm, ornaments).
+"""Explain a user take as the target transformed by τ(t) and Δc(t).
 
 For every user take:
 
@@ -11,8 +11,13 @@ For every user take:
    (missing / extra / different size);
 4. per phrase: overall intonation offset, interval compression (slope of
    user intervals vs target intervals) and tempo drift (mean τ′);
-5. **cannot judge**: frames where either side's pitch confidence or the
-   alignment confidence is too low, and items whose own confidence is.
+5. phonation, dynamics and phrase-level diction items
+   (:mod:`gyeol.explain.attributes`);
+6. **cannot judge**: frames where either side's pitch confidence or the
+   alignment confidence is too low, items whose own confidence is, and
+   frames whose residual difference is unexplained (remainder).
+
+Audibility is filled in afterwards by :func:`gyeol.explain.audibility.score_audibility`.
 
 With several takes, items are keyed by (category, attribute, target note).
 A difference with the same sign in every take and |mean| > SD is labelled
@@ -30,6 +35,7 @@ from ..align.warp import Warp, WarpConfig, estimate_warp, onset_deviations, temp
 from ..core.containers import Consistency, Explanation, ExplanationItem, Representation, Span
 from ..core.status import Result
 from ..dsp.base import runs
+from .attributes import diction_items, phonation_dynamics_items, remainder_spans
 
 EVENT_KINDS = ("scoop", "fall", "kkeokki", "glide")
 
@@ -43,6 +49,8 @@ class ExplainConfig:
     min_note_frames: int = 5
     vibrato_presence_conf: float = 0.5
     cannot_judge_min_s: float = 0.1
+    #: robust z-score of the residual difference above which frames are unexplained
+    remainder_z: float = 4.0
 
 
 def _at(values: np.ndarray, tau: np.ndarray) -> np.ndarray:
@@ -109,12 +117,14 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
     u_ext, t_ext = uc["vibrato_extent"].values, _at(tc["vibrato_extent"].values, tau)
     u_rate, t_rate = uc["vibrato_rate"].values, _at(tc["vibrato_rate"].values, tau)
     note_centres: list[tuple[float, float]] = []
+    note_spans: dict[int, Span] = {}
 
     for k, (ns, ne) in enumerate(notes):
         sel = np.flatnonzero((tau >= ns) & (tau < ne))
         if sel.size < cfg.min_note_frames:
             continue
         span = Span(int(sel[0]), int(sel[-1]) + 1, _syllables_for(target, ns, ne))
+        note_spans[k] = span
         # intonation: middle 60 % of the note (ornaments live at the edges)
         a, b = int(sel[0] + 0.2 * sel.size), int(sel[0] + 0.8 * sel.size)
         core = np.arange(a, max(a + 1, b))
@@ -193,13 +203,18 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
             "rhythm", "tempo", all_span, float((np.mean(tr[voiced_any]) - 1.0) * 100.0), "%", float(np.mean(warp.confidence[voiced_any])),
             detail={"meaning": "+ rushing, − dragging"})
 
-    # cannot judge: voiced somewhere but not reliably comparable
+    # M5: phonation, dynamics, diction
+    items.update(phonation_dynamics_items(user, target, tau, warp.confidence, notes, note_spans, cfg.min_confidence))
+    items.update(diction_items(user, target, tau, warp.confidence, cfg.min_confidence))
+
+    # cannot judge: voiced somewhere but not reliably comparable, or an unexplained residual remainder
     sung = np.isfinite(u_center) | (_at(tc["voicing"].values, tau) > 0.5)
     bad = sung & ~both
     min_len = int(cfg.cannot_judge_min_s * g.rate)
-    cannot = [Span(s, e) for s, e in runs(bad) if e - s >= min_len]
+    cannot = [Span(s, e, reason="low_confidence") for s, e in runs(bad) if e - s >= min_len]
+    cannot += remainder_spans(user, target, tau, sung, cfg.remainder_z, min_len)
     for key in [k for k, it in items.items() if it.confidence < cfg.min_confidence]:
-        cannot.extend(items.pop(key).spans)
+        cannot.extend(Span(sp.start, sp.end, sp.syllables, f"item_confidence:{key[1]}") for sp in items.pop(key).spans)
     return Result.success(_Take(user, warp, items, cannot, transposition))
 
 
@@ -235,6 +250,6 @@ def explain(user_takes: list[Representation], target: Representation, config: Ex
         grid=last.rep.grid, warp=last.warp.tau, transposition_cents=last.transposition, items=items,
         cannot_judge=sorted(last.cannot, key=lambda s: s.start), n_takes=len(takes),
         meta={"failed_takes": failures, "warp_confidence": last.warp.confidence, "user_quality": last.rep.quality,
-              "target_quality": target.quality, "audibility": "not computed (M5)"},
+              "target_quality": target.quality},
     )
     return Result(Result.success(exp).status, exp, "", failures)

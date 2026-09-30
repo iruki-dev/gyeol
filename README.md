@@ -30,7 +30,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M2 | dataset adapters, augmentation, paired loader | done |
 | M3 | phonation/register/diction heads, calibration, probing (machinery; trained heads need real data) | done |
 | M4 | encoders, acoustic model, source-filter vocoder, losses, leakage/benchmark harness (untrained: needs data + GPU) | done |
-| M5 | full explanation, audibility, consent-gated demos | planned |
+| M5 | full explanation, audibility, consent-gated own-voice demos with AI labelling (DSP renderer; neural renderer needs M4 weights) | done |
 | M6 | coaching policy, onboarding, health guard | planned |
 | M7 | discovery on the residual | planned |
 | M8 | benchmarks, robustness, model cards, ONNX | planned |
@@ -41,6 +41,8 @@ See `docs/milestones/`.
 
 ```bash
 python examples/coach_demo_v2.py --synthetic --out /tmp/gyeol_demo
+# with audibility per item and an AI-labelled stepwise demo in the (synthetic) user's own voice
+python examples/coach_demo_v2.py --synthetic --audibility --render-demo --out /tmp/gyeol_demo
 ```
 
 ## Install
@@ -57,7 +59,9 @@ pytest
   unknown assets are refused.
 - Weights are never downloaded automatically. `gyeol fetch <name>` shows the license and asks for confirmation first.
 - There is no API that synthesises a target singer's voice. Rendering requires a `ConsentedVoice` built from the
-  user's own recording and consent token.
+  user's own recording and consent token. Renderers also check that the take belongs to that user.
+- Every generated waveform is labelled as AI-generated (metadata tags and a JSON sidecar) and passes through a
+  pluggable watermark hook.
 - Voice-derived data is treated as sensitive biometric information. Storage needs consent, raw audio is deleted after
   feature extraction by default, and `store.delete_user` removes everything.
 

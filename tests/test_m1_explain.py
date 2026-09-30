@@ -53,7 +53,7 @@ def test_explain_recovers_known_knobs(target):
     assert abs(it[("ornament", "vibrato_extent", 4)].magnitude) < 15  # both have it
     assert it[("ornament", "fall", 5)].detail["status"] == "different" and abs(it[("ornament", "fall", 5)].magnitude) < 40
     assert exp.n_takes == 1 and all(i.consistency is Consistency.UNDETERMINED for i in exp.items)
-    assert exp.meta["audibility"].startswith("not computed")
+    assert all(i.audibility is None for i in exp.items)  # filled only by explain.audibility.score_audibility (M5)
 
 
 def test_take_consistency(target):
@@ -123,6 +123,12 @@ def test_demo_runs_end_to_end(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("coach_demo_v2", Path(__file__).parents[1] / "examples" / "coach_demo_v2.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert mod.main(["--synthetic", "--out", str(tmp_path)]) == 0
+    assert mod.main(["--synthetic", "--out", str(tmp_path), "--audibility", "--render-demo"]) == 0
     out = capsys.readouterr().out
     assert "40센트 낮아요" in out and "스쿱" in out and "늦게 들어갔어요" in out
+    # M5: audibility per item and an AI-labelled own-voice demo
+    from gyeol.demo import read_label
+
+    assert "들리는 차이" in out and "AI로 생성" in out
+    demos = sorted(tmp_path.glob("demo_*.wav"))
+    assert len(demos) >= 2 and all(read_label(p)["ai_generated"] for p in demos)

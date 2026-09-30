@@ -144,6 +144,7 @@ class Span:
     start: int  # user frame index (inclusive)
     end: int  # exclusive
     syllables: tuple[str, ...] = ()
+    reason: str = ""  # for "cannot judge" spans: why
 
     def seconds(self, grid: FrameGrid) -> tuple[float, float]:
         return float(grid.time_of(self.start)), float(grid.time_of(self.end))

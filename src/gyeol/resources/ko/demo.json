@@ -1,0 +1,11 @@
+{
+  "_comment": "User-facing Korean strings for own-voice demos. Authored separately from code; coaches may edit.",
+  "ai_notice": "이 오디오는 AI로 생성되었습니다. 사용자 본인의 목소리(동의함)로 만든 연습용 시범입니다.",
+  "step": {
+    "selected": "고른 항목 하나만 고친 버전",
+    "toward_target": "목표 스타일 쪽으로 {percent}% 다가간 버전"
+  },
+  "baseline": "고치지 않은 버전(비교용, AI 재합성)",
+  "clamped": "내 음역·음량 범위를 넘는 부분 {percent}%는 범위 안으로 줄였어요",
+  "unsupported": "이 항목은 아직 시범 음성으로 들려드릴 수 없어요"
+}

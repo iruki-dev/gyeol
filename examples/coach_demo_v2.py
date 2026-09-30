@@ -1,4 +1,4 @@
-"""gyeol v2 coaching demo (M1: pitch, rhythm and ornaments).
+"""gyeol v2 coaching demo (M1 explanation; M5 audibility and own-voice demos).
 
     # synthetic target + two user takes with known deviations
     python examples/coach_demo_v2.py --synthetic --out /tmp/gyeol_demo
@@ -6,10 +6,18 @@
     # real recordings: target guide vocal + one or more sing-along takes
     python examples/coach_demo_v2.py --target guide.wav --user take1.wav take2.wav --lyrics "사랑해 너를"
 
+    # M5: audibility per item, and a stepwise own-voice demo of the top item
+    python examples/coach_demo_v2.py --synthetic --audibility --render-demo
+
 Steps: load → offline latency refinement against the guide vocal →
 signal-layer analysis → explanation → Korean text from resource files.
-Prioritisation, feedback volume and practice suggestions are M6 (coach);
-audibility scores and own-voice demos are M5.  This demo lists every item.
+With ``--audibility`` / ``--render-demo`` the demo user grants
+``voice_synthesis`` consent in a local :class:`~gyeol.store.ConsentStore`, a
+:class:`~gyeol.core.ConsentedVoice` is built from their **own** last take, and
+the DSP renderer resynthesises that take (never the target).  Demo WAVs are
+AI-labelled (INFO tags + ``.ai.json`` sidecar) and watermarked.
+Prioritisation, feedback volume and practice suggestions are M6 (coach); here
+the demo item is simply the one with the largest confidence × audibility.
 """
 
 from __future__ import annotations
@@ -23,8 +31,10 @@ import numpy as np
 
 from gyeol.attributes.extract import analyze
 from gyeol.context import assign_syllables
-from gyeol.core import Provenance, Recording
-from gyeol.explain import explain
+from gyeol.core import ConsentedVoice, Provenance, Purpose, Recording
+from gyeol.demo import DSPRenderer, UserTake, item_key, render_demo, save_labelled
+from gyeol.encoders.latent import ltas_singer_vector
+from gyeol.explain import explain, score_audibility
 from gyeol.explain.render_text import explanation_notes, item_text, load_strings
 from gyeol.io import load_recording, refine_offset, save_audio, shift
 from gyeol.pitch.adapters import PyinTracker, SHSTracker, YinTracker, default_trackers
@@ -70,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=Path("gyeol_demo_out"))
     ap.add_argument("--dsp-only", action="store_true", help="use only gyeol's DSP pitch trackers")
     ap.add_argument("--show-all", action="store_true", help="list every item, ignoring the demo display filter")
+    ap.add_argument("--audibility", action="store_true", help="score audibility per item (renders your own voice)")
+    ap.add_argument("--render-demo", action="store_true", help="render a stepwise own-voice demo of the top item")
     args = ap.parse_args(argv)
 
     if args.synthetic:
@@ -106,11 +118,13 @@ def main(argv: list[str] | None = None) -> int:
         if off.usable:
             audio = shift(rec.audio, off.value.latency_s, rec.sr)
             print(f"{p.name}: latency refined by {off.value.latency_s * 1000:.0f} ms ({off.status.value})")
-        rep = analyze(Recording(audio, rec.sr, Provenance.USER, owner_id=rec.owner_id, recording_id=rec.recording_id), trackers=trackers)
+        aligned = Recording(audio, rec.sr, Provenance.USER, owner_id=rec.owner_id, recording_id=rec.recording_id)
+        rep = analyze(aligned, trackers=trackers)
         if not rep.usable:
             print(f"{p.name}: analysis failed: {rep.reason}", file=sys.stderr)
             continue
         takes.append(rep.value)
+        last_take = UserTake(aligned, rep.value)
     if not takes:
         return 2
     ex = explain(takes, target)
@@ -119,6 +133,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     e = ex.value
     s = load_strings("ko")
+    voice = None
+    if args.audibility or args.render_demo:
+        from gyeol.store import ConsentStore
+
+        # in the app the user grants this on a consent screen; here the demo user does
+        token = ConsentStore(args.out / "consent").grant(last_take.recording.owner_id, {Purpose.ANALYSIS, Purpose.VOICE_SYNTHESIS})
+        voice = ConsentedVoice.create(ltas_singer_vector(last_take.recording), last_take.recording, token)
+        renderer = DSPRenderer()
+        if args.audibility:
+            aud = score_audibility(e, voice, last_take, target, renderer)
+            if not aud.ok:
+                print(f"audibility failed: {aud.reason}", file=sys.stderr)
     print(f"\n=== 설명 ({e.n_takes}회 녹음, 마지막 녹음 기준) ===")
     for line in explanation_notes(e):
         print(f"  · {line}")
@@ -129,11 +155,42 @@ def main(argv: list[str] | None = None) -> int:
         if not args.show_all and (small or it.confidence < display["min_confidence"]):
             hidden += 1
             continue
+        aud = "" if it.audibility is None else f"; {s['audibility']['label']} {it.audibility:.3f}"
         print(f"[{s['category'][it.category]}] {item_text(it)}  "
-              f"(신뢰도 {it.confidence:.2f}; {s['consistency'][it.consistency.value]})")
+              f"(신뢰도 {it.confidence:.2f}{aud}; {s['consistency'][it.consistency.value]})")
     if hidden:
         print(f"  (작은 차이 {hidden}개는 숨겼어요 — --show-all 로 모두 보기)")
-    print(f"\n  · {s['audibility_pending']}")
+    if not args.audibility:
+        print(f"\n  · {s['audibility']['unavailable']}")
+    if args.render_demo:
+        return _render(e, voice, last_take, target, renderer, args.out)
+    return 0
+
+
+def _render(e, voice, take, target, renderer, out: Path) -> int:
+    from importlib import resources
+
+    ds = json.loads(resources.files("gyeol").joinpath("resources/ko/demo.json").read_text(encoding="utf-8"))
+    cands = [it for it in e.items if it.category != "diction" and it.confidence >= 0.5]
+    if not cands:
+        print("no confident item to demonstrate")
+        return 0
+    top = max(cands, key=lambda it: it.confidence * (it.audibility if it.audibility is not None else abs(it.magnitude)))
+    d = render_demo(voice, take, e, target, item_key(top), renderer)
+    if not d.ok:
+        print(f"demo not rendered: {d.reason}", file=sys.stderr)
+        return 0
+    print(f"\n=== 내 목소리 시범: {item_text(top)} ===")
+    print(f"  · {ds['ai_notice']}")
+    save_labelled(out / "demo_0_baseline.wav", d.value.baseline)
+    print(f"  demo_0_baseline.wav — {ds['baseline']}")
+    for i, st in enumerate(d.value.steps, 1):
+        name = f"demo_{i}_{st.step.label}.wav"
+        save_labelled(out / name, st.audio)
+        label = ds["step"]["selected"] if st.step.label == "selected" else ds["step"]["toward_target"].format(percent=round(100 * st.step.alpha))
+        print(f"  {name} — {label}")
+        if round(100 * st.clamp.clamped_fraction) >= 1:
+            print(f"     {ds['clamped'].format(percent=round(100 * st.clamp.clamped_fraction))}")
     return 0
 
 

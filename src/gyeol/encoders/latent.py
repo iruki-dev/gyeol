@@ -154,3 +154,21 @@ class LeakageHeads(nn.Module):
     def forward(self, r: torch.Tensor) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         z = grad_reverse(r, self.grl)
         return {k: m(z) for k, m in self.reg.items()}, {k: m(z) for k, m in self.cls.items()}
+
+
+def ltas_singer_vector(recording: Recording, n_bands: int = 32, voiced: np.ndarray | None = None) -> SingerVector:
+    """A **DSP** timbre descriptor (long-term average spectrum in mel bands, dB,
+    mean-removed) wrapped as a :class:`SingerVector`.
+
+    It is not a learned identity embedding: it exists so the DSP renderer can
+    be consent-gated exactly like the neural one before a singer encoder is
+    trained.  Provenance and owner are inherited from the recording.
+    """
+    from .mel import LogMel
+
+    mel = LogMel(recording.sr, n_mels=n_bands)(torch.tensor(recording.audio, dtype=torch.float32)[None])[0].numpy()
+    if voiced is not None:
+        v = np.asarray(voiced, bool)[: len(mel)]
+        mel = mel[: len(v)][v] if v.any() else mel
+    ltas = mel.mean(axis=0)
+    return SingerVector(ltas - ltas.mean(), recording.provenance, recording.recording_id, owner_id=recording.owner_id)

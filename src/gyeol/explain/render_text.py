@@ -49,15 +49,30 @@ def particles(word: str) -> dict[str, str]:
             "euro": "으로" if has and fc != 8 else "로"}  # ㄹ-final takes 로
 
 
+def _template_key(attr: str) -> tuple[str, str | None]:
+    """(template name, label) — ``quality_breathy`` → (``quality``, ``breathy``)."""
+    for prefix in ("quality_", "laryngeal_"):
+        if attr.startswith(prefix):
+            return prefix[:-1], attr[len(prefix):]
+    return attr, None
+
+
 def item_text(it: ExplanationItem, lang: str = "ko") -> str:
     s = load_strings(lang)
-    tmpl = s["attribute"].get(it.attribute)
+    name, label = _template_key(it.attribute)
+    tmpl = s["attribute"].get(name)
     if tmpl is None:
         return f"{it.category}/{it.attribute}: {it.magnitude:+.1f} {it.unit}"
-    key = it.detail.get("status") or ("pos" if it.magnitude >= 0 else "neg")
-    value = f"{abs(it.magnitude):.0f}" if abs(it.magnitude) >= 10 else f"{abs(it.magnitude):.1f}"
+    mag = it.magnitude * 100.0 if it.unit in ("similarity", "probability") else it.magnitude
+    key = it.detail.get("status") or ("pos" if mag >= 0 else "neg")
+    if key not in tmpl:
+        key = next(iter(tmpl))
+    value = f"{abs(mag):.0f}" if abs(mag) >= 10 else f"{abs(mag):.1f}"
     where = _where(it, s)
-    return tmpl[key].format(where=where, value=value, unit=it.unit, **particles(where))
+    names = s.get("labels", {})
+    extra = {"label": names.get(label, label or ""), "target": names.get(str(it.detail.get("target", "")), it.detail.get("target", "")),
+             "user": names.get(str(it.detail.get("user", "")), it.detail.get("user", ""))}
+    return tmpl[key].format(where=where, value=value, unit=it.unit, **particles(where), **extra)
 
 
 def explanation_notes(exp: Explanation, lang: str = "ko") -> list[str]:
@@ -75,5 +90,7 @@ def explanation_notes(exp: Explanation, lang: str = "ko") -> list[str]:
         out.append(s["quality_flag"].get(flag, flag))
     for sp in exp.cannot_judge:
         a, b = sp.seconds(exp.grid)
-        out.append(s["cannot_judge"].format(start=f"{a:.1f}", end=f"{b:.1f}"))
+        reason = sp.reason.split(":", 1)[0] if sp.reason else "low_confidence"
+        tmpl = s["cannot_judge"].get(reason, s["cannot_judge"]["low_confidence"])
+        out.append(tmpl.format(start=f"{a:.1f}", end=f"{b:.1f}"))
     return out
