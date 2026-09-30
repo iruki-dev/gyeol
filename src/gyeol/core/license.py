@@ -99,6 +99,8 @@ REGISTRY: dict[str, LicensedAsset] = {
            caveats=("Training-data provenance of the community weights is unclear.",)),
         _a("openvpi_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
         _a("openvpi_pc_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
+        _a("own_recordings", D, OK, "in-house (user consent)", "recordings made in the gyeol app",
+           conditions=("Only recordings whose owner consents to the training purpose may be used (enforced by data.adapters.scan_own).",)),
         _a("so_vits_svc", M, CL, "AGPL-3.0", "so-vits-svc", vendor_allowed=False),
         _a("pesto", M, CL, "LGPL-3.0", "PESTO", vendor_allowed=False),
     ]
@@ -147,6 +149,13 @@ def require_allowed(asset: LicensedAsset, profile: Profile, *, announce: bool = 
             else:
                 warnings.warn(f"[gyeol license] {n}", stacklevel=2)
     return d
+
+
+def register(asset: LicensedAsset, *, replace: bool = False) -> None:
+    """Add an asset (e.g. a new dataset or checkpoint) to the registry."""
+    if asset.name in REGISTRY and not replace:
+        raise ValueError(f"{asset.name!r} is already registered")
+    REGISTRY[asset.name] = asset
 
 
 def lookup(name: str) -> LicensedAsset:
