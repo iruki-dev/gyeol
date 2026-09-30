@@ -15,7 +15,7 @@ test against it is part of the M8 evaluation.
 Rendering the user's voice needs a :class:`~gyeol.core.consent.ConsentedVoice`,
 so audibility is only computed for users who consented to voice synthesis;
 otherwise items keep ``audibility = None`` and the coach falls back to
-confidence alone.
+confidence × size over measurement uncertainty (:mod:`gyeol.coach.priority`).
 """
 
 from __future__ import annotations

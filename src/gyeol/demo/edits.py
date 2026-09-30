@@ -48,7 +48,7 @@ ItemKey = tuple[str, str, int]
 
 
 def item_key(it: ExplanationItem) -> ItemKey:
-    return (it.category, it.attribute, int(it.detail.get("target_note", -1)))
+    return it.key
 
 
 @dataclass

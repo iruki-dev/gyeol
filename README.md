@@ -31,7 +31,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M3 | phonation/register/diction heads, calibration, probing (machinery; trained heads need real data) | done |
 | M4 | encoders, acoustic model, source-filter vocoder, losses, leakage/benchmark harness (untrained: needs data + GPU) | done |
 | M5 | full explanation, audibility, consent-gated own-voice demos with AI labelling (DSP renderer; neural renderer needs M4 weights) | done |
-| M6 | coaching policy, onboarding, health guard | planned |
+| M6 | coaching policy (fitted thresholds, priority, fading, self-assessment), onboarding, health guard, practice mapping | done |
 | M7 | discovery on the residual | planned |
 | M8 | benchmarks, robustness, model cards, ONNX | planned |
 
@@ -43,6 +43,9 @@ See `docs/milestones/`.
 python examples/coach_demo_v2.py --synthetic --out /tmp/gyeol_demo
 # with audibility per item and an AI-labelled stepwise demo in the (synthetic) user's own voice
 python examples/coach_demo_v2.py --synthetic --audibility --render-demo --out /tmp/gyeol_demo
+# coaching: fit display thresholds (synthetic knob recovery), then coach each take as an attempt
+python examples/fit_thresholds.py --synthetic --out /tmp/gyeol_demo/thresholds.json
+python examples/coach_demo_v2.py --synthetic --coach /tmp/gyeol_demo/thresholds.json --noticed pitch
 ```
 
 ## Install

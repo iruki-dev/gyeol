@@ -163,6 +163,12 @@ class ExplanationItem:
     audibility: float | None = None  # M5; None = not computed
     detail: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def key(self) -> tuple[str, str, int]:
+        """(category, attribute, target note or −1): identity of an item across takes and attempts."""
+        k = self.detail.get("target_note", -1)
+        return (self.category, self.attribute, -1 if k is None else int(k))
+
 
 @dataclass
 class Explanation:

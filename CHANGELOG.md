@@ -5,6 +5,21 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M6 — coaching policy
+- `gyeol.coach` (pure logic):
+  - fitted display thresholds, where an item is shown only above max(MDC95, E95(confidence)), with provenance
+    and no numeric fallback;
+  - priority by confidence × audibility (or size over uncertainty) with the brief's tie order;
+  - one primary and at most two secondary items, a fading schedule (full → half → quarter) driven by the
+    stability of the error load, self-assessment before reveal, and session summaries.
+- Practice mapping from a coach-authored data file (`resources/ko/practice.json`).
+- SSAP/SPB-style onboarding scoring: production accuracy, precision and perception, routed without labelling
+  anyone.
+- Vocal-health guard: range/tessitura phrase check with transposition, beginner restrictions (rough, fry, belt,
+  high chest), phonation time, within-session fatigue flags and a persistent medical-referral notice.
+- `gyeol.eval.knob_recovery` and `examples/fit_thresholds.py`; `coach_demo_v2.py --coach`.
+- `ExplanationItem.key`.
+
 ### M5 — full explanation and demo
 - Explanation items for phonation (breathiness from the aperiodic ratio; tentative register and phonation-quality
   items from learned heads), dynamics (per-note loudness, phrase dynamic range) and phrase-level diction against the

@@ -9,6 +9,10 @@
     # M5: audibility per item, and a stepwise own-voice demo of the top item
     python examples/coach_demo_v2.py --synthetic --audibility --render-demo
 
+    # M6: coaching policy (thresholds fitted by examples/fit_thresholds.py)
+    python examples/fit_thresholds.py --synthetic --out thresholds.json
+    python examples/coach_demo_v2.py --synthetic --coach thresholds.json --level beginner
+
 Steps: load → offline latency refinement against the guide vocal →
 signal-layer analysis → explanation → Korean text from resource files.
 With ``--audibility`` / ``--render-demo`` the demo user grants
@@ -82,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--show-all", action="store_true", help="list every item, ignoring the demo display filter")
     ap.add_argument("--audibility", action="store_true", help="score audibility per item (renders your own voice)")
     ap.add_argument("--render-demo", action="store_true", help="render a stepwise own-voice demo of the top item")
+    ap.add_argument("--coach", type=Path, help="coach each take with thresholds from this JSON (see fit_thresholds.py)")
+    ap.add_argument("--level", default="beginner", choices=["beginner", "intermediate", "advanced"])
+    ap.add_argument("--noticed", nargs="*", help="self-assessment answer, e.g. --noticed pitch rhythm")
     args = ap.parse_args(argv)
 
     if args.synthetic:
@@ -162,9 +169,47 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  (작은 차이 {hidden}개는 숨겼어요 — --show-all 로 모두 보기)")
     if not args.audibility:
         print(f"\n  · {s['audibility']['unavailable']}")
+    if args.coach:
+        _coach(takes, target, args)
     if args.render_demo:
         return _render(e, voice, last_take, target, renderer, args.out)
     return 0
+
+
+def _coach(takes, target, args) -> None:
+    """Treat each take as one attempt of a coaching session (M6)."""
+    import numpy as np
+
+    from gyeol.coach import CoachConfig, CoachSession, ThresholdSet, VoiceRange, attempt_metrics, note_centres, voiced_seconds
+    from gyeol.coach.session import coach_strings
+
+    cs = coach_strings("ko")
+    ts = ThresholdSet.from_json(args.coach)
+    sung = np.concatenate([t.curves["f0_cents"].values for t in takes])
+    try:  # demo only: range from the takes themselves; the app measures it at onboarding
+        # (assume a little headroom beyond what was sung: glides are not recorded in this demo)
+        vr = VoiceRange.from_samples(np.concatenate([sung - 300, sung + 300]), sung, source="observed takes (demo)")
+    except ValueError:
+        vr = None
+    session = CoachSession(ts, CoachConfig(level=args.level), voice_range=vr, target_notes_cents=note_centres(target))
+    print("\n=== 코칭 ===")
+    if ts.provenance.get("synthetic"):
+        print(f"  {cs['feedback']['thresholds_synthetic']}")
+    for i, rep in enumerate(takes, 1):
+        ex = explain(takes[:i], target)  # all takes so far: habit vs error across attempts
+        if not ex.usable:
+            continue
+        attempt = session.new_attempt(ex.value, metrics=attempt_metrics(rep), voiced_s=voiced_seconds(rep))
+        if args.noticed is not None:
+            print(f"  ? {attempt.self_assessment_prompt().question}  → {', '.join(args.noticed) or '-'}")
+            attempt.record_self_assessment(args.noticed or ["nothing"])
+        fb = attempt.reveal()
+        print(f"\n[{cs['feedback']['attempt'].format(n=i)}]")
+        for line in fb.lines:
+            print(f"  {line}")
+    print()
+    for line in session.summary().lines:
+        print(f"  · {line}")
 
 
 def _render(e, voice, take, target, renderer, out: Path) -> int:

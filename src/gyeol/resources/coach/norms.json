@@ -1,0 +1,32 @@
+{
+  "_comment": "Routing norms and health-guard defaults for gyeol.coach. Policy data, not code. Every value is provisional until replaced by app-population norms (M8) and reviewed by a voice teacher / speech-language pathologist. These are NOT the item-display thresholds: those are always fitted (gyeol.coach.thresholds).",
+  "onboarding": {
+    "poor_production_mae_cents": 100.0,
+    "_poor_production_source": "Pfordresher & Brown (2007): inaccurate ('poor-pitch') singers deviate by more than one semitone on average",
+    "imprecise_sd_cents": 50.0,
+    "_imprecise_source": "provisional: half a semitone of trial-to-trial spread",
+    "good_perception_threshold_cents": 50.0,
+    "_perception_source": "provisional: typical adult pitch-discrimination thresholds lie well below a quarter tone; congenital amusia is associated with thresholds near or above a semitone (Peretz et al. 2002)",
+    "perception_criterion": 0.75,
+    "min_trials": {
+      "pitch_match": 4,
+      "interval": 3,
+      "melody": 1,
+      "discrimination": 12
+    }
+  },
+  "health": {
+    "session_phonation_warn_s": 600.0,
+    "daily_phonation_warn_s": 1800.0,
+    "_phonation_source": "app default (accumulated voiced time, not session length); set with an SLP",
+    "fatigue_z": 3.0,
+    "fatigue_min_attempts": 6,
+    "fatigue_window": 3,
+    "beginner_restricted_qualities": [
+      "rough",
+      "fry",
+      "pressed_belt"
+    ],
+    "beginner_no_chest_above_tessitura": true
+  }
+}
