@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gyeol"
+version = "0.1.0"
+description = "Condition-aware intermediate representation of the singing voice (source-filter core + Korean context + validity masks)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "iruki-dev" }]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+audio = ["soundfile>=0.12"]
+torch = ["torch>=2.1"]
+separation = ["demucs>=4.0"]
+korean = ["g2pk"]
+dev = ["pytest>=7", "soundfile>=0.12"]
+
+[project.scripts]
+gyeol = "gyeol.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
