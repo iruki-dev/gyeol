@@ -4,20 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gyeol"
-version = "0.1.0"
-description = "Condition-aware intermediate representation of the singing voice (source-filter core + Korean context + validity masks)"
+version = "2.0.0.dev0"
+description = "Interpretable singing-voice model for Korean vocal coaching: attribute curves, time-warp explanations and consent-gated own-voice demos"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "iruki-dev" }]
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24", "scipy>=1.10"]
+dependencies = ["numpy>=1.24", "scipy>=1.10", "torch>=2.2", "soundfile>=0.12"]
 
 [project.optional-dependencies]
-audio = ["soundfile>=0.12"]
-torch = ["torch>=2.1"]
-separation = ["demucs>=4.0"]
+separation = []          # adapters load user-installed separators; see gyeol.frontend.separation
+ssl = []                 # SSL encoders are loaded from locally fetched checkpoints (M3)
 korean = ["g2pk"]
-dev = ["pytest>=7", "soundfile>=0.12"]
+train = ["omegaconf>=2.3"]
+dev = ["pytest>=7", "ruff>=0.4"]
 
 [project.scripts]
 gyeol = "gyeol.cli:main"
@@ -25,6 +25,17 @@ gyeol = "gyeol.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+gyeol = ["resources/**/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = ["E501", "B905", "B008", "I001"]

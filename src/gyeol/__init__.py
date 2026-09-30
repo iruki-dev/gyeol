@@ -1,41 +1,48 @@
-"""gyeol (결) — a condition-aware intermediate representation of the singing voice.
+"""gyeol (결) v2 — an interpretable singing-voice model for vocal coaching.
 
-Audio → a hybrid representation:
+A sung phrase is represented by three layers:
 
-1. an interpretable, frame-level source–filter core (pitch, source, filter,
-   energy groups),
-2. explicit Korean phonetic-context tokens,
-3. an optional channel-adversarial residual embedding z,
-4. a mandatory per-dimension validity mask driven by a separate nuisance
-   side channel (SNR, bandwidth/codec, clipping, AGC, reverberation,
-   separation quality).
+* global: ``singer`` and ``env`` vectors (M4),
+* interpretable: attribute curves ``c(t)`` with per-frame confidence,
+* residual: a low-dimensional ``r(t)`` for reconstruction only (M4).
 
-Quick start::
+Coaching explains a user's take as the target phrase transformed by a time
+warp ``τ(t)`` and attribute differences ``Δc(t)``; whatever is left over is
+reported as "cannot judge".  Demos are rendered only in the user's own,
+consented voice.
 
-    import gyeol
-    rep = gyeol.analyze("take.wav", lyrics="사랑해")
-    rep.summary()
+See ``docs/milestones`` for what each milestone delivers.
 """
 
-__version__ = "0.1.0"
+__version__ = "2.0.0.dev0"
 
-from .engine import Engine, EngineConfig, analyze  # noqa: E402
-from .representation import ContextTokens, Note, NuisanceReport, Track, VocalRepresentation  # noqa: E402
-from .spec import DIMENSIONS, NOTE_DIMENSIONS, OMISSIONS  # noqa: E402
-from .validity import ValidityPolicy  # noqa: E402
+from .core import (  # noqa: E402
+    AttributeCurve,
+    AttributeCurves,
+    ConsentedVoice,
+    Explanation,
+    FrameGrid,
+    LicenseTag,
+    Profile,
+    Provenance,
+    Recording,
+    Representation,
+    Result,
+    Status,
+)
 
 __all__ = [
     "__version__",
-    "Engine",
-    "EngineConfig",
-    "analyze",
-    "VocalRepresentation",
-    "Track",
-    "Note",
-    "NuisanceReport",
-    "ContextTokens",
-    "ValidityPolicy",
-    "DIMENSIONS",
-    "NOTE_DIMENSIONS",
-    "OMISSIONS",
+    "AttributeCurve",
+    "AttributeCurves",
+    "ConsentedVoice",
+    "Explanation",
+    "FrameGrid",
+    "LicenseTag",
+    "Profile",
+    "Provenance",
+    "Recording",
+    "Representation",
+    "Result",
+    "Status",
 ]

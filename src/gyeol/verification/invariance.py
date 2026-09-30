@@ -1,4 +1,4 @@
-"""Invariance study runner (research §5.ii).
+"""Invariance study runner (ported from gyeol v0.1).
 
 Input: a long table of note- or recording-level dimension values keyed by
 (singer, condition) where *condition* is a device, room, codec, degradation
@@ -15,7 +15,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ..representation import VocalRepresentation
+from ..core.containers import Representation
 from .stats import bland_altman, icc, icc_ci, koo_li, mdc95, sem, within_between_ratio
 
 
@@ -26,15 +26,15 @@ class Record:
     values: dict[str, float]
 
 
-def recording_values(rep: VocalRepresentation, dims: Iterable[str] | None = None) -> dict[str, float]:
-    """Median of valid frames per 1-D dimension (NaN if none valid)."""
+def recording_values(rep: Representation, names: Iterable[str] | None = None, min_confidence: float = 0.5) -> dict[str, float]:
+    """Median of confident frames per 1-D attribute curve (NaN if none)."""
     out = {}
-    for name, tr in rep.tracks.items():
-        if dims is not None and name not in dims:
+    for name, c in rep.curves.items():
+        if names is not None and name not in names:
             continue
-        if tr.values.ndim != 1:
+        if c.values.ndim != 1:
             continue
-        v = tr.valid_values()
+        v = c.values[(c.confidence >= min_confidence) & np.isfinite(c.values)]
         out[name] = float(np.median(v)) if v.size else float("nan")
     return out
 
