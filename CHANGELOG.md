@@ -5,6 +5,17 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### M4 — autoencoder
+- Grid-aligned log-mel.
+- Singer encoder (SupCon, provenance-carrying `SingerVector`), env encoder with augmentation-label heads, and a VIB
+  residual encoder with gradient-reversal leakage adversaries (on r and on the singer vector).
+- Conv-transformer acoustic model with condition dropout.
+- Self-implemented NSF source-filter vocoder (harmonic, subharmonic/jitter and noise branches) and an optional
+  BigVGAN adapter.
+- Losses: MR-STFT and mel with consonant/low-energy weighting, MPD/MSD discriminators, feature matching,
+  r re-encoding consistency.
+- Vocoder benchmark per technique and consonant class; listening-test protocol template.
+
 ### M3 — attribute heads
 - License-gated frozen SSL encoder adapters (local checkpoints only) and a DSP baseline encoder.
 - Multi-task frame heads (register, phonation qualities, laryngeal contrast, phones) and a deterministic training

@@ -29,7 +29,7 @@ Practice demos are rendered only in the **user's own, consented voice**.
 | M1 | signal layer: IO, latency, quality checks, pitch consensus, loudness/aperiodicity, pitch-derived curves, alignment, pitch/rhythm/ornament explanations, demo CLI | done |
 | M2 | dataset adapters, augmentation, paired loader | done |
 | M3 | phonation/register/diction heads, calibration, probing (machinery; trained heads need real data) | done |
-| M4 | encoders, acoustic model, self-trained source-filter vocoder | planned |
+| M4 | encoders, acoustic model, source-filter vocoder, losses, leakage/benchmark harness (untrained: needs data + GPU) | done |
 | M5 | full explanation, audibility, consent-gated demos | planned |
 | M6 | coaching policy, onboarding, health guard | planned |
 | M7 | discovery on the residual | planned |
