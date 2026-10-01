@@ -98,7 +98,11 @@ Tasks: `heads`, `autoencoder`, `vocoder`, `pitch` (RMVPE), `ssl` (fine-tuning).
 - Runs log CSV with an ETA, validate on held-out singers, stop early, keep the best checkpoint, and end with a report
   on unseen singers.
 
-Revision notes: `docs/revisions/` (A: analysis path, B: CPU training, C: library boundary).
+Separating songs: separate each target song once at upload and cache it by content
+(`api.separate_target(song, sr, cache_dir=..., background=True)`). Then analyse the song with `separated=` and user
+takes with `target=`. Headphone takes are separated only when bleed is detected.
+
+Revision notes: `docs/revisions/` (A: analysis path, B: CPU training, C: library boundary, D: follow-up decisions).
 
 ## Install
 

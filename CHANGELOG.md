@@ -5,6 +5,21 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### Revision D — follow-up decisions (see `docs/revisions/D.md`)
+- D1:
+  - Target songs are separated once with BS-RoFormer, in the background, and cached by content hash
+    (`separate_target`, `SeparationCache`, `SeparationQueue`, `api.separate_target(background=True)`).
+  - Headphone takes are separated only when accompaniment bleed is detected against the cached accompaniment,
+    with a selectable light separator (`SEPARATORS`, default `backing`).
+  - `detect_bleed` uses a phase-randomised null and reports delay-peak prominence.
+- D2: BS-RoFormer weights are SHA-256-verified on every load against the registry's pinned hash (hash computed:
+  `5b84f37e…15aa`). Pinning it in the registry and the personal-only restriction are pending (see the note).
+- D3:
+  - Exact-f0 resynthesised copies (`gyeol prepare --resynthesize hnm|vocoder`) are the pitch model's primary
+    ground truth; DSP consensus is a weak label on confident frames only.
+  - Vocadito and MIR-1K adapters, `gyeol eval pitch`, and `model.eval_sets` for pitch runs, all license-gated.
+- D4 (copyleft opt-in): pending (see the note).
+
 ### Revision C — library boundary (see `docs/revisions/C.md`)
 - C1:
   - User state moved out of `src/gyeol` into `reference_service/` (`gyeol_service`): the consent / storage /

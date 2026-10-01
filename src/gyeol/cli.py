@@ -132,13 +132,45 @@ def _eval_realset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _eval_pitch(args: argparse.Namespace) -> int:
+    """Pitch accuracy on a human-annotated set (revision D3); the manifest passes the license gate first."""
+    from .eval.pitch_eval import evaluate_pitch
+
+    if args.checkpoint:
+        from .pitch.rmvpe import RMVPE, RMVPETracker
+        from .train.checkpoint import load_checkpoint
+
+        sd, _ = load_checkpoint(args.checkpoint, Profile(args.profile))
+        model = RMVPE()
+        model.load_state_dict({k[len("pitch."):]: v for k, v in sd.items() if k.startswith("pitch.")})
+        trackers = [RMVPETracker(model=model, profile=Profile(args.profile))]
+    elif args.rmvpe_weights:
+        from .pitch.rmvpe import RMVPETracker
+
+        trackers = [RMVPETracker(args.rmvpe_weights, profile=Profile(args.profile))]
+    else:
+        from .pitch.adapters import PyinTracker, SHSTracker, YinTracker
+
+        trackers = [PyinTracker(), YinTracker(), SHSTracker()]
+    for tr in trackers:
+        r = evaluate_pitch(args.manifest, tr, Profile(args.profile), limit=args.limit)
+        if not r.ok:
+            print(f"{tr.name}: {r.reason}", file=sys.stderr)
+            continue
+        s = r.value.summary()
+        print(f"{s['dataset']} / {s['tracker']}: n={s['n_items']} RPA {s['rpa']:.3f} RCA {s['rca']:.3f} "
+              f"VR {s['voicing_recall']:.3f} VFA {s['voicing_false_alarm']:.3f} OA {s['overall_accuracy']:.3f}")
+    return 0
+
+
 def _prepare(args: argparse.Namespace) -> int:
     """Batch preparation of training data (revision B6)."""
     from .data.prepare import PrepareConfig, prepare, synthetic_manifest
 
     manifests = list(args.manifest or [])
     cfg = PrepareConfig(sr=args.sr, hop=args.hop, separation=args.separation, dsp_trackers_only=not args.neural_trackers,
-                        features=tuple(args.features), max_seconds=args.max_seconds)
+                        features=tuple(args.features), max_seconds=args.max_seconds, resynthesize=tuple(args.resynthesize or ()),
+                        resynth_vocoder=args.resynth_vocoder)
     if args.synthetic:
         manifests.append(synthetic_manifest(Path(args.out) / "synthetic_src", n_singers=args.synthetic, sr=args.sr))
     if not manifests:
@@ -212,6 +244,13 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--per-tracker", action="store_true", help="also report each pitch tracker alone on the raw input")
     rs.add_argument("--verbose", action="store_true")
     rs.set_defaults(fn=_eval_realset)
+    ep = evs.add_parser("pitch", help="pitch accuracy on a human-annotated set (Vocadito, MIR-1K manifests; license-gated)")
+    ep.add_argument("manifest")
+    ep.add_argument("--checkpoint", help="a `gyeol train pitch` checkpoint (full-size RMVPE)")
+    ep.add_argument("--rmvpe-weights", help="fetched reference RMVPE weights")
+    ep.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
+    ep.add_argument("--limit", type=int)
+    ep.set_defaults(fn=_eval_pitch)
     pp = sub.add_parser("prepare", help="prepare training data: separation, pitch, curves, features (resumable)")
     pp.add_argument("--manifest", action="append", help="gyeol manifest JSON (repeatable)")
     pp.add_argument("--out", required=True, help="cache folder")
@@ -226,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
     pp.add_argument("--ssl-layers", type=int, nargs="+", default=[3, 4, 5])
     pp.add_argument("--neural-trackers", action="store_true", help="use the default tracker set (neural trackers need fetched weights)")
     pp.add_argument("--max-seconds", type=float, default=30.0)
+    pp.add_argument("--resynthesize", nargs="+", choices=["hnm", "vocoder"],
+                    help="also write exact-f0 resynthesised copies for pitch training (never of app users' recordings)")
+    pp.add_argument("--resynth-vocoder", help="checkpoint from `gyeol train vocoder` for --resynthesize vocoder")
     pp.add_argument("--synthetic", type=int, default=0, metavar="N_SINGERS", help="also generate a synthetic corpus with N singers")
     pp.add_argument("--limit", type=int)
     pp.add_argument("--verbose", action="store_true")

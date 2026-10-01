@@ -116,6 +116,7 @@ class StreamingDataset(IterableDataset):
         confs = {n: np.zeros((B, L), np.float32) for n in CACHED_CURVES}
         ap = np.zeros((B, L, items[0]["ap_bands"].shape[1]), np.float32)
         feats = {f: np.zeros((B, L, items[0][f"feat/{f}"].shape[1]), np.float32) for f in self.features}
+        f0_exact = np.full((B, L), np.nan, np.float32)  # Hz, 0 = exactly unvoiced, NaN = no exact truth (revision D3)
         for i, (it, s) in enumerate(zip(items, starts)):
             n = min(L, lengths[i] - s)
             mask[i, :n] = True
@@ -125,6 +126,8 @@ class StreamingDataset(IterableDataset):
                 curves[name][i, :n] = it[f"curve/{name}"][s : s + n]
                 confs[name][i, :n] = it[f"conf/{name}"][s : s + n]
             ap[i, :n] = it["ap_bands"][s : s + n]
+            if "f0_exact" in it:
+                f0_exact[i, :n] = it["f0_exact"][s : s + n]
             for f in self.features:
                 feats[f][i, :n] = it[f"feat/{f}"][s : s + n]
         out["mask"] = torch.from_numpy(mask)
@@ -132,6 +135,7 @@ class StreamingDataset(IterableDataset):
         out["curves"] = {k: torch.from_numpy(v) for k, v in curves.items()}
         out["conf"] = {k: torch.from_numpy(v) for k, v in confs.items()}
         out["ap_bands"] = torch.from_numpy(ap)
+        out["f0_exact"] = torch.from_numpy(f0_exact)
         out["feats"] = {k: torch.from_numpy(v) for k, v in feats.items()}
         return out
 

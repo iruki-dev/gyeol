@@ -35,8 +35,10 @@ from ..frontend.quality import QualityPolicy, assess
 from ..frontend.separation import (
     AccompanimentPolicy,
     SeparationPolicy,
-    unseparated_factor,
+    TakePolicy,
     default_separator,
+    make_separator,
+    unseparated_factor,
     estimate_accompaniment,
     separation_quality,
 )
@@ -62,13 +64,18 @@ class AnalysisConfig:
     separation_policy: SeparationPolicy = field(default_factory=SeparationPolicy)
     #: keep the separated vocal in ``rep.meta["separated_audio"]`` (data preparation caches it)
     keep_separated_audio: bool = False
+    #: revision D1: user takes with a known accompaniment are separated only when bleed is detected
+    take: TakePolicy = field(default_factory=TakePolicy)
 
 
 SEPARATION_MODES = ("auto", "always", "off")
 
 
-def _separate(recording: Recording, mode: str, separator, backing, cfg: AnalysisConfig) -> Result[tuple[np.ndarray, dict, list[str]]]:
+def _separate(recording: Recording, mode: str, separator, backing, cfg: AnalysisConfig,
+              accompaniment_ref: np.ndarray | None = None) -> Result[tuple[np.ndarray, dict, list[str]]]:
     """Decide on separation and run it → (signal to analyse, report, warnings)."""
+    from ..frontend.quality import detect_bleed
+
     x, sr = recording.audio, recording.sr
     report: dict = {"mode": mode, "applied": False}
     warnings: list[str] = []
@@ -76,7 +83,30 @@ def _separate(recording: Recording, mode: str, separator, backing, cfg: Analysis
         report["reason"] = "separation disabled"
         return Result.success((x, report, warnings))
     need = mode == "always" or backing is not None
-    if mode == "auto":
+    if mode == "auto" and accompaniment_ref is not None and backing is None:
+        # a headphone take of a known song: separate only when the accompaniment bleeds into the microphone
+        b = detect_bleed(x, accompaniment_ref, sr)
+        if b.usable:
+            bleed, prom = b.value.bleed_db, b.value.lag_prominence
+            found = bool(np.isfinite(bleed) and bleed >= cfg.take.bleed_threshold_db and prom >= cfg.take.min_lag_prominence)
+            report["bleed"] = {"bleed_db": bleed, "lag_prominence": prom, "lag_s": b.value.lag_s, "threshold_db": cfg.take.bleed_threshold_db,
+                               "detected": found}
+            report["accompaniment"] = {"may_contain": found, "residual_db": bleed, "reasons": [f"bleed {bleed:.1f} dB"] if found else []}
+            need = need or found
+        else:
+            report["bleed"] = {"detected": None, "reason": b.reason}
+            report["accompaniment"] = {"may_contain": None, "reasons": [f"undetermined: {b.reason}"]}
+        if not need:
+            report["reason"] = "no accompaniment bleed detected"
+            return Result.success((x, report, warnings))
+        if separator is None or isinstance(separator, str):
+            separator_r = make_separator(separator or cfg.take.separator, cfg.profile, accompaniment=accompaniment_ref, accompaniment_sr=sr)
+            if not separator_r.ok:
+                report["reason"] = f"bleed detected but no separator available: {separator_r.reason}"
+                warnings.append("accompaniment bleed detected and not separated: confidences reduced")
+                return Result.success((x, report, warnings))
+            separator = separator_r.value
+    elif mode == "auto":
         acc = estimate_accompaniment(x, sr, cfg.accompaniment)
         if acc.usable:
             a = acc.value
@@ -89,7 +119,10 @@ def _separate(recording: Recording, mode: str, separator, backing, cfg: Analysis
     if not need:
         report["reason"] = "no accompaniment detected"
         return Result.success((x, report, warnings))
-    sep = Result.success(separator) if separator is not None else default_separator(cfg.profile, backing, sr)
+    if isinstance(separator, str):
+        sep = make_separator(separator, cfg.profile, accompaniment=backing, accompaniment_sr=sr)
+    else:
+        sep = Result.success(separator) if separator is not None else default_separator(cfg.profile, backing, sr)
     if not sep.ok:
         if mode == "always":
             return Result.failure(f"separation required but unavailable: {sep.reason}")
@@ -109,15 +142,23 @@ def _separate(recording: Recording, mode: str, separator, backing, cfg: Analysis
 
 def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = None, content: ContentFeatures | None = None,
             backing: np.ndarray | None = None, config: AnalysisConfig | None = None, separation: str = "auto",
-            separator=None) -> Result[Representation]:
+            separator=None, accompaniment_ref: np.ndarray | None = None) -> Result[Representation]:
     """Build the interpretable layer for one recording.
 
     ``separation``: ``"auto"`` (default) separates the vocal first whenever the
     input may contain accompaniment (:func:`~gyeol.frontend.separation.estimate_accompaniment`,
     or a known ``backing`` track); ``"always"`` requires separation (fails if no
     separator is available); ``"off"`` analyses the input as is.  ``separator``
-    is any object with ``separate(audio, sr) -> Result``; by default the backing
+    is any object with ``separate(audio, sr) -> Result`` or a name from
+    :data:`~gyeol.frontend.separation.SEPARATORS`; by default the backing
     canceller (when ``backing`` is given) or fetched BS-RoFormer weights.
+
+    ``accompaniment_ref`` (revision D1): the cached accompaniment of the target
+    song (:func:`~gyeol.frontend.separation.separate_target`), at this
+    recording's rate.  A user take recorded on headphones is then separated in
+    ``auto`` mode only when that accompaniment bleeds into the microphone
+    (``config.take.bleed_threshold_db``), with the light separator
+    ``config.take.separator`` (default: subtract the known accompaniment).
 
     Returns ``FAILED`` for unusable input (too short, no voiced frames) with
     the reason; quality problems that still allow analysis are reported in
@@ -140,13 +181,14 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
         timings[stage] = now - clock[0]
         clock[0] = now
 
-    sr_ = _separate(recording, separation, separator, backing, cfg)
+    sr_ = _separate(recording, separation, separator, backing, cfg, accompaniment_ref)
     if not sr_.ok:
         return Result.failure(sr_.reason)
     x, sep_report, sep_warnings = sr_.value
     sep_factor = np.ones(grid.n_frames)
     if sep_report.get("applied"):
-        sq = separation_quality(raw, x, sr, grid, backing=backing, separator=sep_report.get("separator", ""), policy=cfg.separation_policy)
+        ref = backing if backing is not None else accompaniment_ref
+        sq = separation_quality(raw, x, sr, grid, backing=ref, separator=sep_report.get("separator", ""), policy=cfg.separation_policy)
         sep_factor = sq.frame_factor
         sep_report.update(residual_db=sq.residual_db, residual_reference=sq.residual_reference, flags=sq.flags,
                           median_frame_sir_db=float(np.median(sq.frame_sir_db)))

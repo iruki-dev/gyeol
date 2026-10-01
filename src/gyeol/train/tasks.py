@@ -686,6 +686,27 @@ class VocoderTask(Task):
                              self.info.sr, self.name, self.cfg.profile)
 
 
+def vocoder_from_checkpoint(path, profile) -> tuple:
+    """(NSFVocoder, LogMel) rebuilt from a ``gyeol train vocoder`` release checkpoint (license-gated, eval mode)."""
+    import torch as _torch
+
+    from ..core.license import Profile as _Profile
+    from ..decoder.vocoder import NSFVocoder
+    from ..encoders.mel import LogMel
+    from .checkpoint import load_checkpoint
+
+    sd, info = load_checkpoint(path, _Profile(profile))
+    meta = _torch.load(path, map_location="cpu", weights_only=True)["gyeol"]
+    if meta.get("task") != "vocoder" or "data" not in meta:
+        raise ValueError(f"{path} is not a vocoder checkpoint written by gyeol train (task {meta.get('task')!r})")
+    m, d = meta.get("model", {}), meta["data"]
+    tiny = m.get("size", "tiny") == "tiny"
+    n_mels, ch = int(m.get("n_mels", 32 if tiny else 80)), int(m.get("channels", 16 if tiny else 256))
+    voc = NSFVocoder(n_mels, int(d["n_ap"]), int(d["sr"]), int(d["hop"]), ch, tuple(m.get("upsample_rates", _rates_for(int(d["hop"])))))
+    voc.load_state_dict({k[len("vocoder."):]: v for k, v in sd.items() if k.startswith("vocoder.")})
+    return voc.eval(), LogMel(int(d["sr"]), int(d["hop"]), n_mels=n_mels), info
+
+
 def _rates_for(hop: int) -> tuple[int, ...]:
     rates, rem = [], hop
     for r in (8, 8, 4, 2, 2, 2):
@@ -727,32 +748,56 @@ class PitchTask(Task):
             sd = {f"model.{k}": v for k, v in sd.items()}
         super().load_init(component, module, sd)
 
-    def _targets(self, b) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """16 kHz audio, target salience (B, T16, 360), frame weights (B, T16), target cents re 10 Hz (0 = unvoiced)."""
+    def _targets(self, b) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """16 kHz audio, target salience (B, T16, 360), frame weights (B, T16), target cents re 10 Hz (0 = unvoiced),
+        and a mask of frames whose target is exact.
+
+        Revision D3: items with ``f0_exact`` (resynthesised copies) are the primary ground truth — every frame,
+        voiced or not, at ``exact_weight``.  Other items contribute DSP consensus only as a *weak* label on
+        confidently voiced frames (``weak_min_confidence``) at ``weak_weight``; their other frames are ignored.
+        """
         from ..dsp.base import resample
         from ..pitch.rmvpe import CENTS0, HOP, N_BINS, SR
 
+        w_exact, w_weak = float(self.m.get("exact_weight", 1.0)), float(self.m.get("weak_weight", 0.3))
+        weak_conf = float(self.m.get("weak_min_confidence", 0.8))
         x16 = torch.tensor(np.stack([resample(a.numpy().astype(float), b["sr"], SR) for a in b["audio"]]), dtype=torch.float32)
         T16 = x16.shape[1] // HOP + 1
         t16 = np.arange(T16) * HOP / SR
         tg = np.arange(b["frames"]) * b["hop"] / b["sr"]
+        near = np.clip(np.round(t16 * b["sr"] / b["hop"]).astype(int), 0, len(tg) - 1)
+        inside = (t16 <= tg[-1] + 1e-9)
         c = b["curves"]["f0_cents"].numpy()
         conf = (b["conf"]["f0_cents"] * b["mask"]).numpy()
+        mask = b["mask"].numpy()
+        exact_hz = b["f0_exact"].numpy() if "f0_exact" in b else np.full(c.shape, np.nan)
         cents10 = np.zeros((len(c), T16))
         w = np.zeros((len(c), T16))
+        exact = np.zeros((len(c), T16), bool)
+        to10 = 1200 * np.log2(440.0 / 10.0)
         for i in range(len(c)):
-            ok = conf[i] > 0
-            near = np.clip(np.round(t16 * b["sr"] / b["hop"]).astype(int), 0, len(tg) - 1)
-            vi = ok[near]
-            ci = np.interp(t16, tg[ok], c[i][ok]) if ok.sum() >= 2 else np.zeros(T16)
-            cents10[i] = np.where(vi, ci + 1200 * np.log2(440.0 / 10.0), 0.0)
-            w[i] = np.where(near < b["frames"], 1.0, 0.0) * (t16 <= tg[-1] + 1e-9)
+            valid = mask[i][near] & inside
+            ex = exact_hz[i]
+            if np.isfinite(ex[mask[i]]).any():
+                hz = np.nan_to_num(ex)
+                v = hz > 0
+                cents = np.where(v, 1200 * np.log2(np.maximum(hz, 1e-9) / 440.0), np.nan)
+                ci = np.interp(t16, tg[v], cents[v]) if v.sum() >= 2 else np.zeros(T16)
+                cents10[i] = np.where(v[near], ci + to10, 0.0)
+                w[i] = w_exact * valid
+                exact[i] = valid
+            else:
+                ok = conf[i] >= weak_conf
+                ci = np.interp(t16, tg[ok], c[i][ok]) if ok.sum() >= 2 else np.zeros(T16)
+                cents10[i] = np.where(ok[near], ci + to10, 0.0)
+                w[i] = w_weak * (ok[near] & valid)
         bins = CENTS0 + 20.0 * np.arange(N_BINS)
         sal = np.exp(-((cents10[..., None] - bins) ** 2) / (2 * self.sigma**2)) * (cents10[..., None] > 0)
-        return x16, torch.tensor(sal, dtype=torch.float32), torch.tensor(w, dtype=torch.float32), torch.tensor(cents10)
+        return (x16, torch.tensor(sal, dtype=torch.float32), torch.tensor(w, dtype=torch.float32), torch.tensor(cents10),
+                torch.tensor(exact))
 
     def train_step(self, batch, scale, step):
-        x16, sal, w, _ = self._targets(batch)
+        x16, sal, w, _, _ = self._targets(batch)
         pred = self.rmvpe(x16.to(self.device))
         T = min(pred.shape[1], sal.shape[1])
         bce = F.binary_cross_entropy(pred[:, :T].clamp(1e-6, 1 - 1e-6), sal[:, :T].to(self.device), reduction="none").mean(-1)
@@ -766,22 +811,40 @@ class PitchTask(Task):
 
         acc = _Acc()
         for b in batches:
-            x16, sal, w, cents10 = self._targets(b)
+            x16, sal, w, cents10, exact = self._targets(b)
             pred = self.rmvpe(x16.to(self.device))
             T = min(pred.shape[1], sal.shape[1])
             bce = F.binary_cross_entropy(pred[:, :T].clamp(1e-6, 1 - 1e-6), sal[:, :T].to(self.device), reduction="none").mean(-1)
             acc.add("loss", float((bce * w[:, :T]).sum() / w[:, :T].sum().clamp_min(1.0)))
             est = np.stack([salience_to_cents(p) for p in pred[:, :T].cpu().numpy()])
-            ref = cents10[:, :T].numpy()
-            vm = (ref > 0) & (w[:, :T].numpy() > 0)
-            if vm.any():
-                acc.add_pair("rpa", (float(((est > 0) & (np.abs(est - ref) <= 50))[vm].sum()), int(vm.sum())))
-            um = (ref == 0) & (w[:, :T].numpy() > 0)
-            if um.any():
-                acc.add_pair("unvoiced_correct", (float((est[um] == 0).sum()), int(um.sum())))
+            ref, used, ex = cents10[:, :T].numpy(), w[:, :T].numpy() > 0, exact[:, :T].numpy()
+            for tag, sel in (("exact", used & ex), ("weak", used & ~ex)):
+                vm = sel & (ref > 0)
+                if vm.any():
+                    acc.add_pair(f"rpa_{tag}", (float(((est > 0) & (np.abs(est - ref) <= 50))[vm].sum()), int(vm.sum())))
+                um = sel & (ref == 0)
+                if um.any():
+                    acc.add_pair(f"unvoiced_correct_{tag}", (float((est[um] == 0).sum()), int(um.sum())))
         out = acc.means()
         out["score"] = out.get("loss", float("nan"))
         return out
+
+    def finalize(self, cache, splits, out_dir):
+        """Evaluate the best weights on human-annotated real singing (``model.eval_sets``: manifests, license-gated)."""
+        sets = list(self.m.get("eval_sets", []))
+        if not sets:
+            return {}
+        from ..core.license import Profile as _Profile
+        from ..eval.pitch_eval import evaluate_pitch
+        from ..pitch.rmvpe import RMVPETracker
+
+        tracker = RMVPETracker(model=self.rmvpe.eval(), profile=_Profile(self.cfg.profile))
+        report = {}
+        for m in sets:
+            r = evaluate_pitch(m, tracker, _Profile(self.cfg.profile))
+            report[str(m)] = r.value.summary() if r.ok else {"error": r.reason}
+        (out_dir / "pitch_eval.json").write_text(json.dumps(report, indent=1, default=float), encoding="utf-8")
+        return {"annotated_eval": report}
 
 
 TASK_CLASSES = {"heads": HeadsTask, "autoencoder": AutoencoderTask, "vocoder": VocoderTask, "pitch": PitchTask, "ssl": SSLTask}

@@ -217,6 +217,17 @@ class BSRoFormer(nn.Module):
                              f"unexpected {res.unexpected_keys[:8]}{'…' if len(res.unexpected_keys) > 8 else ''}")
 
 
+def file_sha256(path: str | Path, chunk: int = 1 << 22) -> str:
+    """SHA-256 of a weight file (checked against the registry's pinned value on every load)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 class RoFormerSeparator:
     """Vocal stem from a BS-RoFormer, in cross-faded overlapping chunks (the separator protocol: ``separate(audio, sr)``)."""
 
@@ -224,6 +235,7 @@ class RoFormerSeparator:
                  profile: Profile = Profile.COMMERCIAL, name: str = "bs-roformer", device: str = "cpu"):
         require_allowed(lookup(asset), profile, announce=False)
         self.model, self.sr, self.chunk, self.overlap, self.asset, self.name, self.device = model.eval(), sr, chunk, overlap, asset, name, device
+        self.weights_sha256: str | None = None
         self.model.to(device)
 
     @classmethod
@@ -232,9 +244,15 @@ class RoFormerSeparator:
         require_allowed(lookup(asset), profile, announce=False)  # gate before reading the weights
         if not Path(path).is_file():
             raise FileNotFoundError(f"no separator weights at {path}; fetch them with `gyeol fetch {asset}` (shows the license first)")
+        digest = file_sha256(path)
+        pinned = lookup(asset).sha256
+        if pinned and digest != pinned:
+            raise ValueError(f"checksum mismatch for {path}: sha256 {digest} is not the pinned {pinned} of {asset!r}; refusing to load")
         model = BSRoFormer(**(config or VIPERX_EP317))
         model.load_reference_weights(path)
-        return cls(model, asset=asset, profile=profile, **kw)
+        sep = cls(model, asset=asset, profile=profile, **kw)
+        sep.weights_sha256 = digest
+        return sep
 
     @classmethod
     def from_cache(cls, asset: str = "bs_roformer_viperx_ep317", profile: Profile = Profile.COMMERCIAL, **kw) -> Result["RoFormerSeparator"]:

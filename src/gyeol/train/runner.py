@@ -67,8 +67,9 @@ def prepare_data(cfg: TrainConfig, progress: Callable[[str], None] | None = None
 
     cache = Path(cfg.data.cache)
     pc = dict(cfg.data.prepare)
-    if "features" in pc:
-        pc["features"] = tuple(pc["features"])
+    for k in ("features", "resynthesize"):
+        if k in pc:
+            pc[k] = tuple(pc[k])
     pcfg = PrepareConfig(**pc)
     manifests = list(cfg.data.manifests)
     if cfg.data.synthetic is not None:
@@ -144,6 +145,8 @@ class Trainer:
         rows = read_index(self.cache)
         if cfg.data.datasets:
             rows = [r for r in rows if r["dataset"] in cfg.data.datasets]
+        if cfg.task != "pitch":  # exact-f0 resynthesised copies are pitch training data only (revision D3)
+            rows = [r for r in rows if not (r.get("meta") or {}).get("resynth")]
         for ds in sorted({r["dataset"] for r in rows}):
             from ..core.license import require_allowed
 
@@ -258,7 +261,8 @@ class Trainer:
         path = self.out / f"{name}.pt"
         save_checkpoint(path, self.task.release_state(), name=f"{self.cfg.task}-{name}", sources=self.lineage.assets,
                         config=self.cfg.as_dict(), profile=Profile(self.cfg.profile), parents=self.lineage.parents,
-                        extra={"task": self.cfg.task, "step": self.position.step, "components": dict(self.plan.modes)})
+                        extra={"task": self.cfg.task, "step": self.position.step, "components": dict(self.plan.modes),
+                               "model": dict(self.cfg.model), "data": {"sr": self.info.sr, "hop": self.info.hop, "n_ap": self.info.n_ap}})
         return path
 
     def _csv(self, name: str, row: dict, fields: list[str]) -> None:

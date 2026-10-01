@@ -159,9 +159,13 @@ class BleedReport:
     bleed_db: float  # predicted-leakage energy relative to the mic signal
     lag_s: float
     coherence: float
+    #: robust z-score of the GCC-PHAT peak among all lags: leakage has one sharp, consistent delay across
+    #: frequencies; a voice that merely shares pitches with the accompaniment does not
+    lag_prominence: float = float("nan")
 
 
-def detect_bleed(mic: np.ndarray, backing: np.ndarray, sr: int, max_lag_s: float = 0.5, nperseg: int = 2048) -> Result[BleedReport]:
+def detect_bleed(mic: np.ndarray, backing: np.ndarray, sr: int, max_lag_s: float = 0.5, nperseg: int = 2048,
+                 n_surrogates: int = 6) -> Result[BleedReport]:
     """How much of the backing track leaks into the microphone.
 
     The lag comes from PHAT-weighted cross-correlation.  The leaked fraction
@@ -183,6 +187,10 @@ def detect_bleed(mic: np.ndarray, backing: np.ndarray, sr: int, max_lag_s: float
     R = np.fft.rfft(mic, nfft) * np.conj(np.fft.rfft(b, nfft))
     cc = np.fft.irfft(R / (np.abs(R) + EPS), nfft)
     lag = int(np.argmax(cc[: max_lag + 1]))
+    window = cc[: max_lag + 1]
+    rest = np.delete(window, np.arange(max(0, lag - 3), min(len(window), lag + 4)))
+    mad = 1.4826 * float(np.median(np.abs(rest - np.median(rest)))) if rest.size else 0.0
+    prominence = float((window[lag] - np.median(rest)) / (mad + 1e-12)) if rest.size else float("nan")
     b_al = np.r_[np.zeros(lag), b[: n - lag]]
     _, pmm = signal.welch(mic, sr, nperseg=nperseg)
 
@@ -191,10 +199,20 @@ def detect_bleed(mic: np.ndarray, backing: np.ndarray, sr: int, max_lag_s: float
         return float(np.sum(coh * pmm) / (np.sum(pmm) + EPS)), coh
 
     frac, coh = leaked(b_al)
-    # empirical bias floor: the same statistic against a decorrelated copy
-    null, _ = leaked(np.roll(b_al, n // 2))
+    # empirical bias floor: the same statistic against a phase-randomised copy (same spectrum, no phase
+    # relation to the mic).  A circular shift is not a valid null for music: repeated bars and choruses
+    # stay coherent with themselves and would cancel real leakage.
+    # The bias is about as large as a −20 dB leak for a few seconds of audio, so it is averaged over several
+    # surrogates to make the subtraction precise.
+    _, _, Z = signal.stft(b_al, sr, nperseg=nperseg)
+    rng = np.random.default_rng(0)
+    nulls = []
+    for _ in range(n_surrogates):
+        _, surrogate = signal.istft(np.abs(Z) * np.exp(2j * np.pi * rng.random(Z.shape)), sr, nperseg=nperseg)
+        nulls.append(leaked(np.pad(surrogate[:n], (0, max(0, n - len(surrogate)))))[0])
+    null = float(np.mean(nulls))
     frac = max(frac - null, 0.0)
-    return Result.success(BleedReport(10 * np.log10(frac + 1e-9), lag / sr, float(np.mean(coh))))
+    return Result.success(BleedReport(10 * np.log10(frac + 1e-9), lag / sr, float(np.mean(coh)), prominence))
 
 
 @dataclass

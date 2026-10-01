@@ -212,6 +212,7 @@ class SeparationPolicy:
     sir_high_db: float = 5.0  # … and 1
     max_residual_db: float = -20.0  # leakage of the accompaniment into the stem above which it is flagged
     residual_penalty: float = 0.5  # factor on all frames when flagged
+    min_lag_prominence: float = 16.0  # residual counts only with a sharp delay peak (see TakePolicy)
     unseparated_factor: float = 0.5  # factor when accompaniment is suspected but no separator is available …
     unseparated_full_db: float = -15.0  # … applied in full when the estimated residual is at or above this level,
     unseparated_none_db: float = -30.0  # … and fading to 1 as it falls to this level (a faint residual barely matters)
@@ -260,6 +261,10 @@ def separation_quality(mixture: np.ndarray, stem: np.ndarray, sr: int, grid, *, 
     ref, ref_name = (np.asarray(backing, float), "backing") if backing is not None else (acc, "estimate")
     b = detect_bleed(voc[:n], ref, sr)
     residual = b.value.bleed_db if b.usable else float("nan")
+    if b.usable and not b.value.lag_prominence >= pol.min_lag_prominence:
+        # no sharp delay peak: the coherence comes from pitches the voice shares with the accompaniment,
+        # not from leakage — report the resolution floor
+        residual = min(residual, -30.0)
     win = int(0.046 * sr)
     centres = np.round(grid.times() * sr).astype(int)
 
@@ -298,3 +303,203 @@ def default_separator(profile: Profile = Profile.COMMERCIAL, backing: np.ndarray
     if r.ok:  # only successes are cached: a fetch later in the process is picked up
         _SEPARATOR_CACHE[key] = r
     return r
+
+
+# ---------------------------------------------------------------- separator choice and the target cache (revision D1)
+#
+# The target song is separated once — asynchronously, at upload — with the heavy BS-RoFormer, and the stems are
+# cached by content hash.  User takes are assumed to be recorded on headphones: ``analyze(separation="auto")``
+# separates a take only when accompaniment bleed into the microphone is detected against the cached
+# accompaniment, and then with a selectable *light* separator (by default the backing canceller, which subtracts
+# the known accompaniment).
+
+#: separator names → "heavy" (target songs) or "light" (user takes)
+SEPARATORS = {"bs_roformer": "heavy", "roformer_light": "light", "htdemucs": "light", "backing": "light"}
+
+
+def make_separator(name, profile: Profile = Profile.COMMERCIAL, *, accompaniment: np.ndarray | None = None,
+                   accompaniment_sr: int | None = None, checkpoint: str | None = None, config: dict | None = None,
+                   asset: str | None = None) -> Result:
+    """A separator by name (or pass an object with ``separate(audio, sr)`` through).
+
+    * ``bs_roformer`` — fetched viperx BS-RoFormer weights (heavy; for target songs);
+    * ``roformer_light`` — a smaller BS-RoFormer from a local ``checkpoint`` with its ``config`` and registry ``asset``;
+    * ``htdemucs`` — HTDemucs (needs the ``demucs`` package and its weights registered as ``asset``);
+    * ``backing`` — subtracts a known ``accompaniment`` (e.g. the cached accompaniment of the target song).
+
+    Never downloads; every weight file passes the license gate for ``profile``.
+    """
+    if hasattr(name, "separate"):
+        return Result.success(name)
+    if name not in SEPARATORS:
+        raise ValueError(f"unknown separator {name!r}; one of {', '.join(SEPARATORS)}")
+    if name == "backing":
+        if accompaniment is None:
+            return Result.unavailable("the backing canceller needs the accompaniment (separate the target song first)")
+        return Result.success(BackingTrackCanceller(np.asarray(accompaniment, float), accompaniment_sr or 44100))
+    if name == "bs_roformer":
+        return default_separator(profile)
+    if name == "roformer_light":
+        if not checkpoint:
+            return Result.unavailable("roformer_light needs a local checkpoint, its config and its registry asset")
+        from .roformer import RoFormerSeparator
+
+        try:
+            return Result.success(RoFormerSeparator.from_checkpoint(checkpoint, config, asset=asset or "roformer_community", profile=profile,
+                                                                    name="roformer-light"))
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            return Result.failure(f"roformer_light: {exc}")
+    try:  # htdemucs
+        import demucs  # noqa: F401
+    except ImportError:
+        return Result.unavailable("htdemucs needs the demucs package")
+    if asset is None:
+        return Result.unavailable("register the HTDemucs weights in the license registry and pass asset=<name>")
+    return Result.success(DemucsSeparator(asset=asset, profile=profile))
+
+
+@dataclass
+class TargetSeparation:
+    """Stems of one target song: the vocal and the accompaniment (mixture − vocal), at the mixture's rate."""
+
+    key: str
+    vocal: np.ndarray
+    accompaniment: np.ndarray
+    sr: int
+    separator: str
+    meta: dict
+
+
+def content_key(audio: np.ndarray, sr: int, separator_id: str) -> str:
+    """SHA-256 over the mono float32 samples, the rate and the separator identity."""
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(np.ascontiguousarray(to_mono(np.asarray(audio, float)).astype("<f4")).tobytes())
+    h.update(f"|{int(sr)}|{separator_id}".encode())
+    return h.hexdigest()
+
+
+class SeparationCache:
+    """File cache of target separations keyed by content hash: ``<root>/<k[:2]>/<k>.npz`` + ``.json`` (atomic writes)."""
+
+    def __init__(self, root):
+        from pathlib import Path
+
+        self.root = Path(root)
+
+    def _paths(self, key: str):
+        d = self.root / key[:2]
+        return d / f"{key}.npz", d / f"{key}.json"
+
+    def get(self, key: str) -> TargetSeparation | None:
+        import json
+
+        npz, meta = self._paths(key)
+        if not (npz.exists() and meta.exists()):
+            return None
+        m = json.loads(meta.read_text(encoding="utf-8"))
+        with np.load(npz) as z:
+            return TargetSeparation(key, z["vocal"].astype(float), z["accompaniment"].astype(float), int(m["sr"]), m["separator"], m)
+
+    def put(self, ts: TargetSeparation) -> None:
+        import json
+        import os
+        import tempfile
+
+        npz, meta = self._paths(ts.key)
+        npz.parent.mkdir(parents=True, exist_ok=True)
+        for path, write in ((npz, lambda fh: np.savez(fh, vocal=ts.vocal.astype(np.float32), accompaniment=ts.accompaniment.astype(np.float32))),
+                            (meta, lambda fh: fh.write(json.dumps({**ts.meta, "sr": ts.sr, "separator": ts.separator, "key": ts.key},
+                                                                  default=str).encode()))):
+            fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    write(fh)
+                os.replace(tmp, path)
+            except BaseException:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+                raise
+
+
+def separate_target(audio: np.ndarray, sr: int, *, cache: SeparationCache | None = None, separator="bs_roformer",
+                    profile: Profile = Profile.COMMERCIAL, separator_id: str | None = None, **kw) -> Result[TargetSeparation]:
+    """Separate a target song once; with a ``cache``, the result is stored and later calls return it without separating."""
+    import time
+
+    x = to_mono(np.asarray(audio, float))
+    sid = separator_id or (separator if isinstance(separator, str) else getattr(separator, "name", type(separator).__name__))
+    key = content_key(x, sr, sid)
+    if cache is not None:
+        hit = cache.get(key)
+        if hit is not None:
+            hit.meta["cache"] = "hit"
+            return Result.success(hit)
+    sep = make_separator(separator, profile, **kw)
+    if not sep.ok:
+        return Result(sep.status, None, sep.reason)
+    t0 = time.perf_counter()
+    out = sep.value.separate(x, sr)
+    if not out.ok:
+        return Result(out.status, None, out.reason)
+    vocal = np.asarray(out.value, float)[: len(x)]
+    vocal = np.pad(vocal, (0, len(x) - len(vocal)))
+    ts = TargetSeparation(key, vocal, x - vocal, int(sr), sid, {"separator_name": getattr(sep.value, "name", sid), "seconds": time.perf_counter() - t0,
+                                                                "asset": getattr(sep.value, "asset", None), "profile": Profile(profile).value,
+                                                                "weights_sha256": getattr(sep.value, "weights_sha256", None), "cache": "miss"})
+    if cache is not None:
+        cache.put(ts)
+    return Result.success(ts)
+
+
+class SeparationQueue:
+    """Background separation of uploaded target songs (one worker by default; duplicate submissions share a future)."""
+
+    def __init__(self, cache: SeparationCache | None = None, max_workers: int = 1):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Lock
+
+        self.cache = cache
+        self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="gyeol-separation")
+        self._pending: dict = {}
+        self._lock = Lock()
+
+    def submit(self, audio: np.ndarray, sr: int, *, separator="bs_roformer", profile: Profile = Profile.COMMERCIAL,
+               separator_id: str | None = None, **kw):
+        sid = separator_id or (separator if isinstance(separator, str) else getattr(separator, "name", type(separator).__name__))
+        key = content_key(audio, sr, sid)
+        with self._lock:
+            fut = self._pending.get(key)
+            if fut is None or (fut.done() and not fut.result().ok):
+                fut = self._pool.submit(separate_target, audio, sr, cache=self.cache, separator=separator, profile=profile,
+                                        separator_id=sid, **kw)
+                self._pending[key] = fut
+        return fut
+
+    def shutdown(self, wait: bool = True) -> None:
+        self._pool.shutdown(wait=wait)
+
+
+class PrecomputedSeparator:
+    """Hands back an already separated vocal (e.g. from :class:`SeparationCache`) as if separating."""
+
+    def __init__(self, ts: TargetSeparation):
+        self.ts, self.name = ts, f"{ts.separator} (cached)"
+
+    def separate(self, audio: np.ndarray, sr: int) -> Result[np.ndarray]:
+        if sr != self.ts.sr or abs(len(audio) - len(self.ts.vocal)) > sr // 100:
+            return Result.failure("cached separation does not belong to this recording (rate or length differs)")
+        v = self.ts.vocal[: len(audio)]
+        return Result.success(np.pad(v, (0, len(audio) - len(v))))
+
+
+@dataclass
+class TakePolicy:
+    """When a user take (headphones assumed) is separated: only if accompaniment bleed is detected."""
+
+    bleed_threshold_db: float = -25.0  # detect_bleed resolves leakage down to ≈ −30 dB
+    #: …and the leakage must have a sharp delay peak (GCC-PHAT robust z).  On synthetic takes a clean voice
+    #: scores 9–12, −30 dB bleed 13–18, −25 dB 21–29, −20 dB 33–45
+    min_lag_prominence: float = 16.0
+    separator: str = "backing"  # light separator for takes; see SEPARATORS

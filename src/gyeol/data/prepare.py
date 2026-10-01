@@ -49,6 +49,12 @@ class PrepareConfig:
     features: tuple[str, ...] = ("dsp",)  # "dsp" and/or "ssl"
     max_seconds: float = 30.0  # longer files are cut (training crops are short anyway)
     min_voiced_frames: int = 10
+    #: revision D3 — exact-f0 copies for pitch training: "hnm" (MDB-stem-synth-style harmonic-plus-noise
+    #: resynthesis with the analysed f0) and/or "vocoder" (a gyeol-trained NSF vocoder, ``resynth_vocoder``).
+    #: The f0 the copy is synthesised with is its ground truth (``f0_exact``); never applied to app users' recordings.
+    resynthesize: tuple[str, ...] = ()
+    resynth_vocoder: str | None = None
+    resynth_min_confidence: float = 0.5  # analysed frames below this confidence are synthesised unvoiced
 
 
 @dataclass
@@ -197,9 +203,95 @@ def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path, pro
                     "license": ds.asset.tag.value}
             done.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
             rep.done += 1
+            for method in cfg.resynthesize:
+                _resynth_item(items_dir, out, arrays, info, method, cfg, profile, rep, progress)
     write_index(out)
     rep.seconds = time.time() - t0
     return rep
+
+
+_VOCODERS: dict = {}
+
+
+def resynthesize_exact_f0(arrays: dict, cfg: PrepareConfig, method: str, profile=Profile.COMMERCIAL) -> Result[tuple[np.ndarray, np.ndarray]]:
+    """(audio, exact f0 per frame in Hz, NaN = unvoiced) synthesised with the analysed f0 of a prepared item."""
+    from ..core.grid import FrameGrid
+
+    sig = np.asarray(arrays["audio"], float)
+    T = int(arrays["n_frames"])
+    c, conf = arrays["curve/f0_cents"].astype(float), arrays["conf/f0_cents"].astype(float)
+    f0 = np.where(np.isfinite(c) & (conf >= cfg.resynth_min_confidence), 440.0 * 2 ** (np.nan_to_num(c) / 1200.0), np.nan)
+    if np.isfinite(f0).sum() < cfg.min_voiced_frames:
+        return Result.failure("too few confident voiced frames to resynthesise")
+    if method == "hnm":
+        from ..demo.hnm import analyze_hnm, synthesize_hnm
+
+        p = analyze_hnm(sig, FrameGrid(cfg.sr, cfg.hop, T), f0)
+        y = synthesize_hnm(p, seed=0)
+        return Result.success((np.pad(y, (0, max(0, len(sig) - len(y))))[: len(sig)], p.f0_hz))
+    if method == "vocoder":
+        import torch
+
+        if not cfg.resynth_vocoder:
+            return Result.failure("resynthesize 'vocoder' needs resynth_vocoder (a checkpoint from gyeol train vocoder)")
+        key = (cfg.resynth_vocoder, Profile(profile))
+        if key not in _VOCODERS:
+            from ..train.tasks import vocoder_from_checkpoint
+
+            _VOCODERS[key] = vocoder_from_checkpoint(cfg.resynth_vocoder, profile)
+        voc, mel, _ = _VOCODERS[key]
+        if voc.sr != cfg.sr or voc.hop != cfg.hop:
+            return Result.failure(f"vocoder runs at {voc.sr} Hz / hop {voc.hop}, the cache at {cfg.sr} / {cfg.hop}")
+        with torch.no_grad():
+            x = torch.tensor(sig[: (T - 1) * cfg.hop], dtype=torch.float32)[None]
+            m = mel(x)[:, :T]
+            n = m.shape[1]
+            f0_t = torch.tensor(np.nan_to_num(f0[:n]), dtype=torch.float32)[None]
+            ap = torch.tensor(arrays["ap_bands"][:n], dtype=torch.float32)[None]
+            rough = torch.tensor(np.clip(np.nan_to_num(arrays["curve/subharmonic_ratio"][:n]) / 0.5, 0, 1), dtype=torch.float32)[None]
+            y = voc(m, ap, f0_t, rough, seed=0)[0].numpy().astype(float)
+        truth = np.full(T, np.nan)
+        truth[:n] = np.where(f0[:n] > 0, f0[:n], np.nan)
+        return Result.success((np.pad(y, (0, max(0, len(sig) - len(y))))[: len(sig)], truth))
+    return Result.failure(f"unknown resynthesis method {method!r} (hnm | vocoder)")
+
+
+def _resynth_item(items_dir: Path, out: Path, arrays: dict, info: dict, method: str, cfg: PrepareConfig, profile, rep: PrepareReport,
+                  progress) -> None:
+    rid = f"{info['id']}~{method}"
+    if (items_dir / f"{rid}.done").exists():
+        return
+    fail = None
+    if info["dataset"] == "own_recordings":
+        fail = "resynthesis of app users' recordings is not allowed (voice synthesis needs the owner's separate consent)"
+    else:
+        r = resynthesize_exact_f0(arrays, cfg, method, profile)
+        if not r.usable:
+            fail = r.reason
+        else:
+            y, truth = r.value
+            from dataclasses import replace
+
+            p = _prepare_one(y, cfg.sr, replace(cfg, separation="off"))
+            if not p.usable:
+                fail = f"analysis of the resynthesised audio failed: {p.reason}"
+    if fail is not None:
+        rec = {"id": rid, "dataset": info["dataset"], "path": info["path"], "reason": fail, "time": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        with open(out / "failures.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        rep.failed += 1
+        rep.failures.append(rec)
+        return
+    a2 = p.value
+    T2 = int(a2["n_frames"])
+    a2["f0_exact"] = np.pad(np.nan_to_num(truth, nan=0.0), (0, max(0, T2 - len(truth))))[:T2].astype(np.float32)
+    _save_npz_atomic(items_dir / f"{rid}.npz", a2)
+    meta = {**info.get("meta", {}), "resynth": method, "f0_truth": "exact", "source_id": info["id"]}
+    row = {**info, "id": rid, "meta": meta, "n_frames": T2, "n_samples": int(len(a2["audio"]))}
+    (items_dir / f"{rid}.done").write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8")
+    rep.done += 1
+    if progress:
+        progress(f"{rid} (exact-f0 {method} copy)")
 
 
 def write_index(out_dir: str | Path) -> Path:

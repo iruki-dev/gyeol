@@ -68,7 +68,8 @@ def _audio(audio, sr):
 def analyze(audio: np.ndarray | str | Path, sr: int | None = None, *, role: str = "user", owner_id: str | None = None,
             reference: tuple[np.ndarray, int] | str | Path | None = None, backing: np.ndarray | None = None,
             separation: str = "auto", profile: Profile | str = Profile.COMMERCIAL, dsp_only: bool = False,
-            lyrics: str | None = None, recording_id: str | None = None) -> Result[Representation]:
+            lyrics: str | None = None, recording_id: str | None = None, separated=None, target=None,
+            take_separator=None) -> Result[Representation]:
     """Analyse one recording.
 
     ``role``: ``"user"`` (the app user's own take; ``owner_id`` required),
@@ -78,6 +79,15 @@ def analyze(audio: np.ndarray | str | Path, sr: int | None = None, *, role: str 
     the estimate is kept in ``rep.meta["latency"]`` (the shared-clock premise
     reads its confidence).  ``lyrics`` maps syllables onto the notes of a
     reference.  ``separation``: ``auto`` | ``always`` | ``off`` (revision A1).
+
+    Revision D1:
+
+    * ``separated`` (reference role): the song's :class:`~gyeol.frontend.separation.TargetSeparation`
+      from :func:`separate_target` — its cached vocal is analysed instead of separating again;
+    * ``target`` (user role): the target song's ``TargetSeparation``; the take (assumed recorded on
+      headphones) is separated only when its accompaniment bleeds into the microphone, with
+      ``take_separator`` (a name from ``SEPARATORS`` — default ``"backing"``, which subtracts the cached
+      accompaniment — or a separator object).
     """
     from .attributes.extract import AnalysisConfig
     from .attributes.extract import analyze as _analyze
@@ -110,13 +120,51 @@ def analyze(audio: np.ndarray | str | Path, sr: int | None = None, *, role: str 
             latency = {"offset_s": 0.0, "confidence": 0.0, "method": "onset-xcorr", "status": off.status.value, "reason": off.reason}
     kw = {"recording_id": recording_id} if recording_id else {}
     rec = Recording(x, sr, prov, owner_id=owner_id if prov is Provenance.USER else None, **kw)
-    r = _analyze(rec, trackers=_trackers(dsp_only, prof), backing=backing, separation=separation, config=AnalysisConfig(profile=prof))
+    separator, acc_ref = take_separator, None
+    if separated is not None:
+        from .frontend.separation import PrecomputedSeparator
+
+        separator, separation = PrecomputedSeparator(separated), "always"
+    if target is not None:
+        acc_ref = np.asarray(target.accompaniment, float)
+        if target.sr != sr:
+            from .dsp.base import resample
+
+            acc_ref = resample(acc_ref, target.sr, sr)
+    r = _analyze(rec, trackers=_trackers(dsp_only, prof), backing=backing, separation=separation, config=AnalysisConfig(profile=prof),
+                 separator=separator, accompaniment_ref=acc_ref)
     if r.usable:
         if latency is not None:
             r.value.meta["latency"] = latency
         if lyrics:
             r.value.meta["syllables"] = assign_syllables(r.value.meta.get("notes", []), lyrics)
     return r
+
+
+def separate_target(audio: np.ndarray | str | Path, sr: int | None = None, *, cache_dir: str | Path | None = None,
+                    separator="bs_roformer", profile: Profile | str = Profile.COMMERCIAL, background: bool = False, **kw):
+    """Separate an uploaded target song once (heavy BS-RoFormer by default) and cache the stems by content hash.
+
+    ``background=True`` returns a :class:`concurrent.futures.Future` from a per-cache background queue, so the
+    upload request can return at once; the result (``Result[TargetSeparation]``) is cached, and later calls with
+    the same audio return it immediately.  Pass the result to :func:`analyze` as ``separated=`` (the song) or
+    ``target=`` (user takes).
+    """
+    from .frontend.separation import SeparationCache, SeparationQueue
+    from .frontend.separation import separate_target as _separate_target
+
+    x, sr = _audio(audio, sr)
+    cache = SeparationCache(cache_dir) if cache_dir is not None else None
+    if not background:
+        return _separate_target(x, sr, cache=cache, separator=separator, profile=Profile(profile), **kw)
+    key = str(Path(cache_dir).resolve()) if cache_dir is not None else None
+    q = _QUEUES.get(key)
+    if q is None:
+        q = _QUEUES[key] = SeparationQueue(cache)
+    return q.submit(x, sr, separator=separator, profile=Profile(profile), **kw)
+
+
+_QUEUES: dict = {}
 
 
 @dataclass
@@ -259,5 +307,6 @@ def text(explanation: Explanation, lang: str = "ko") -> tuple[list[str], list[tu
 
 
 __all__ = ["ConsentError", "ConsentToken", "DemoResult", "OwnVoice", "Profile", "Purpose", "Result", "Status", "SynthNote", "analyze",
+           "separate_target",
            "compare", "explanation_notes", "from_dict", "from_json", "item_text", "json_schema", "load_audio", "load_strings", "melody",
            "render_demo", "save_audio", "text", "to_dict", "to_json", "train"]
