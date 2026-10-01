@@ -58,6 +58,8 @@ class AnalysisConfig:
     #: revision A1: accompaniment detection and separation-quality policies
     accompaniment: AccompanimentPolicy = field(default_factory=AccompanimentPolicy)
     separation_policy: SeparationPolicy = field(default_factory=SeparationPolicy)
+    #: keep the separated vocal in ``rep.meta["separated_audio"]`` (data preparation caches it)
+    keep_separated_audio: bool = False
 
 
 SEPARATION_MODES = ("auto", "always", "off")
@@ -214,6 +216,8 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
               "failed_trackers": p.failed_trackers, "octave_repaired_fraction": float(p.octave_repaired[voiced].mean())},
     )
     rep.meta["analysis_signal"] = "separated vocal" if sep_report.get("applied") else "input"
+    if cfg.keep_separated_audio and sep_report.get("applied"):
+        rep.meta["separated_audio"] = x
     warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings + sep_warnings
     if cfg.heads is not None:
         lr = _learned_curves(rep, xc, sr, cfg, ff, voiced)

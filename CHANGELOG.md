@@ -5,6 +5,33 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### Revision B — CPU training (see `docs/revisions/B.md`)
+- B1:
+  - `device="auto"` resolves to CUDA when available, otherwise CPU in float32; thread count configurable.
+  - A CPU forward/backward test for every module, plus a coverage check that new modules get one.
+- B2: `gyeol train <task> --config <yaml>` for `heads`, `autoencoder`, `vocoder`, `pitch` (RMVPE) and `ssl`
+  (fine-tuning), built on the existing step functions and losses.
+- B3:
+  - Atomic training state (temp file + `os.replace`): modules, optimizers, schedulers, RNG states, epoch, step and
+    data position.
+  - Periodic saves, and saves on SIGINT/SIGTERM.
+  - `--resume` reproduces an uninterrupted run bit for bit (tested for every task).
+- B4:
+  - Gradient accumulation.
+  - Random-length crops.
+  - Optional gradient checkpointing (`checkpointing: [component]`).
+  - An `IterableDataset` that streams prepared items from disk and is deterministic across worker counts.
+- B5: per-component `freeze | finetune | scratch`; initial weights from local gyeol or registered third-party
+  checkpoints through the license gate; lineage recorded in released checkpoints (`parents`).
+- B6: `gyeol prepare --manifest ...` runs separation, pitch, curves, band aperiodicity and DSP/SSL feature caching.
+  It is resumable through per-item completion markers, and failures are logged with reasons.
+- B7: singer-disjoint train/val/test split, early stopping, best-checkpoint release, and a final report on unseen
+  singers. The heads and ssl tasks are also calibrated on the validation singers.
+- B8:
+  - ETA, `train_log.csv` and `val_log.csv`.
+  - AI-labelled audio samples for the generative tasks.
+  - `configs/cpu-smoke/` (run in CI) and `configs/cpu-full/`.
+
 ### Revision A — analysis path (see `docs/revisions/A.md`)
 - A1:
   - `analyze(separation="auto" | "always" | "off")`, with `auto` as the default.

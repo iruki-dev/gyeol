@@ -55,14 +55,22 @@ class CheckpointInfo:
         return LicensedAsset(self.name, AssetKind.CHECKPOINT, self.license, self.license.value, conditions=tuple(self.conditions), verified=True)
 
 
-def save_checkpoint(path: str | Path, state_dict: dict, *, name: str, sources: list[str], config: Any, profile: Profile) -> CheckpointInfo:
+def save_checkpoint(path: str | Path, state_dict: dict, *, name: str, sources: list[str], config: Any, profile: Profile,
+                    parents: list[CheckpointInfo] | None = None, extra: dict | None = None) -> CheckpointInfo:
+    """Write a release checkpoint; its license is the most restrictive of ``sources`` (registry names) and
+    ``parents`` (gyeol checkpoints it was initialised from)."""
     assets = [lookup(s) for s in sources]
-    tag = most_restrictive([a.tag for a in assets])
+    parents = list(parents or [])
+    tag = most_restrictive([a.tag for a in assets] + [p.license for p in parents])
     if Profile(profile) is Profile.COMMERCIAL and tag not in (LicenseTag.COMMERCIAL_OK, LicenseTag.COMMERCIAL_OK_CONDITIONAL):
         raise LicenseError(f"a commercial-profile checkpoint cannot be built from {tag.value} sources")
-    conditions = sorted({c for a in assets for c in a.conditions})
+    conditions = sorted({c for a in assets for c in a.conditions} | {c for p in parents for c in p.conditions})
     info = CheckpointInfo(name, tag, list(sources), config_hash(config), Profile(profile), conditions)
-    torch.save({"state_dict": state_dict, "gyeol": {**asdict(info), "license": tag.value, "profile": Profile(profile).value}}, path)
+    from .state import atomic_save
+
+    lineage = [{"name": p.name, "license": p.license.value, "sources": list(p.sources), "profile": p.profile.value} for p in parents]
+    atomic_save({"state_dict": state_dict, "gyeol": {**asdict(info), "license": tag.value, "profile": Profile(profile).value,
+                                                     "parents": lineage, **(extra or {})}}, path)
     return info
 
 

@@ -1,0 +1,22 @@
+# Long unattended CPU run: fine-tune HuBERT base (fetched fairseq weights, MIT) through the attribute heads
+# (measured ~8 s/step on 4 CPU threads → 60k steps ≈ 5.5 days).
+task: ssl
+seed: 0
+profile: commercial
+device: auto
+threads: 0
+data:
+  cache: runs/cpu-full/cache
+  manifests: []
+  prepare: {sr: 44100, hop: 512, separation: auto, features: [dsp]}
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  crop_frames: [96, 192]
+  batch_size: 4
+  num_workers: 2
+optim: {lr: 1.0e-4, weight_decay: 1.0e-4, grad_accum: 4, grad_clip: 1.0, schedule: cosine, warmup_steps: 1000, betas: [0.9, 0.98]}
+run: {out: runs/cpu-full/ssl, max_steps: 60000, val_every: 2000, save_every: 500, log_every: 50, patience: 10, val_batches: 50}
+model: {arch: hubert_base, layers_used: [3, 4, 5], hidden: 128}
+components: {ssl: finetune, heads: scratch}
+finetune_lr_scale: 0.1
+init: {ssl: {path: ~/.cache/gyeol/hubert_fairseq/hubert_base.pt, asset: hubert_fairseq}}
+checkpointing: [ssl]

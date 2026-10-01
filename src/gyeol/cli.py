@@ -4,6 +4,8 @@
     gyeol fetch <name> [--yes]     show the license, ask, then download
     gyeol profile [wav]            per-stage latency of the analysis pipeline
     gyeol eval realset <folder>    evaluate on user-supplied real recordings (manifest.jsonl)
+    gyeol prepare --manifest m.json --out cache     separation, pitch, curves, features (resumable)
+    gyeol train <task> --config run.yaml [--resume] heads | autoencoder | vocoder | pitch | ssl
 """
 
 from __future__ import annotations
@@ -130,6 +132,53 @@ def _eval_realset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare(args: argparse.Namespace) -> int:
+    """Batch preparation of training data (revision B6)."""
+    from .data.prepare import PrepareConfig, prepare, synthetic_manifest
+
+    manifests = list(args.manifest or [])
+    cfg = PrepareConfig(sr=args.sr, hop=args.hop, separation=args.separation, dsp_trackers_only=not args.neural_trackers,
+                        features=tuple(args.features), max_seconds=args.max_seconds)
+    if args.synthetic:
+        manifests.append(synthetic_manifest(Path(args.out) / "synthetic_src", n_singers=args.synthetic, sr=args.sr))
+    if not manifests:
+        print("nothing to prepare: give --manifest (one or more) or --synthetic N", file=sys.stderr)
+        return 2
+    ssl = None
+    if "ssl" in cfg.features:
+        if not (args.ssl_checkpoint and args.ssl_asset):
+            print("--features ssl needs --ssl-checkpoint and --ssl-asset (a fetched, registered checkpoint)", file=sys.stderr)
+            return 2
+        from .encoders.frame import ssl_from_checkpoint
+
+        ssl = ssl_from_checkpoint(args.ssl_arch, args.ssl_checkpoint, args.ssl_asset, args.ssl_layers, Profile(args.profile))
+    rep = prepare(manifests, args.out, Profile(args.profile), cfg, ssl_encoder=ssl, limit=args.limit,
+                  progress=(lambda s: print(f"  {s}", file=sys.stderr)) if args.verbose else None)
+    print(rep.summary())
+    for f in rep.failures[:20]:
+        print(f"  failed: {f['path']}: {f['reason']}")
+    if rep.failed:
+        print(f"  all failures with reasons: {Path(args.out) / 'failures.jsonl'}")
+    return 0 if rep.done + rep.skipped > 0 else 1
+
+
+def _train(args: argparse.Namespace) -> int:
+    """Training runner (revision B2)."""
+    from .train.config import load_config
+    from .train.runner import train
+
+    overrides = list(args.set or [])
+    for flag, key in ((args.device, "device"), (args.threads, "threads"), (args.out, "run.out"), (args.max_steps, "run.max_steps")):
+        if flag is not None:
+            overrides.append(f"{key}={flag}")
+    cfg = load_config(args.config, args.task, overrides)
+    res = train(cfg, resume=args.resume, stop_after_steps=args.stop_after)
+    print(f"{res.status}: {res.position.step} steps → {res.out_dir}")
+    if res.best_checkpoint:
+        print(f"best weights: {res.best_checkpoint}")
+    return 0 if res.status in ("finished", "early_stopped") else 3
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gyeol", description="gyeol v2 — interpretable singing-voice model")
     p.add_argument("--version", action="version", version=f"gyeol {__version__}")
@@ -163,6 +212,35 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--per-tracker", action="store_true", help="also report each pitch tracker alone on the raw input")
     rs.add_argument("--verbose", action="store_true")
     rs.set_defaults(fn=_eval_realset)
+    pp = sub.add_parser("prepare", help="prepare training data: separation, pitch, curves, features (resumable)")
+    pp.add_argument("--manifest", action="append", help="gyeol manifest JSON (repeatable)")
+    pp.add_argument("--out", required=True, help="cache folder")
+    pp.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
+    pp.add_argument("--sr", type=int, default=44100)
+    pp.add_argument("--hop", type=int, default=512)
+    pp.add_argument("--separation", default="auto", choices=["auto", "always", "off"])
+    pp.add_argument("--features", nargs="+", default=["dsp"], choices=["dsp", "ssl"])
+    pp.add_argument("--ssl-checkpoint")
+    pp.add_argument("--ssl-asset", help="registry name of the SSL weights (license gate), e.g. hubert_fairseq")
+    pp.add_argument("--ssl-arch", default="hubert_base", choices=["hubert_base", "wavlm_base"])
+    pp.add_argument("--ssl-layers", type=int, nargs="+", default=[3, 4, 5])
+    pp.add_argument("--neural-trackers", action="store_true", help="use the default tracker set (neural trackers need fetched weights)")
+    pp.add_argument("--max-seconds", type=float, default=30.0)
+    pp.add_argument("--synthetic", type=int, default=0, metavar="N_SINGERS", help="also generate a synthetic corpus with N singers")
+    pp.add_argument("--limit", type=int)
+    pp.add_argument("--verbose", action="store_true")
+    pp.set_defaults(fn=_prepare)
+    tr = sub.add_parser("train", help="train a task from a YAML config (CPU or CUDA; interruptible, resumable)")
+    tr.add_argument("task", choices=["heads", "autoencoder", "vocoder", "pitch", "ssl"])
+    tr.add_argument("--config", required=True)
+    tr.add_argument("--resume", action="store_true", help="continue the run in run.out exactly where it stopped")
+    tr.add_argument("--device", help="auto | cpu | cuda (overrides the config)")
+    tr.add_argument("--threads", type=int)
+    tr.add_argument("--out", help="run folder (overrides run.out)")
+    tr.add_argument("--max-steps", type=int)
+    tr.add_argument("--set", action="append", metavar="KEY=VALUE", help="override a config value, e.g. optim.lr=1e-3 (repeatable)")
+    tr.add_argument("--stop-after", type=int, help=argparse.SUPPRESS)  # simulate an interruption (tests / CI)
+    tr.set_defaults(fn=_train)
     args = p.parse_args(argv)
     return args.fn(args)
 

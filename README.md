@@ -57,7 +57,26 @@ gyeol eval realset /path/to/realset --split held_out --per-tracker
 gyeol fetch bs_roformer_viperx_ep317
 ```
 
-Revision notes: `docs/revisions/` (A: analysis path).
+## Train on a CPU (or a GPU)
+
+```bash
+pip install -e ".[train]"            # PyYAML + torchaudio
+# prepare data once (separation, pitch, curves, features; resumable, failures logged)
+gyeol prepare --manifest data/manifests/vocalset.json --out runs/cache
+# every task has a smoke preset (minutes on a laptop CPU, runs in CI) and a long-run preset
+gyeol train heads --config configs/cpu-smoke/heads.yaml
+gyeol train autoencoder --config configs/cpu-full/autoencoder.yaml   # days; Ctrl-C saves, then:
+gyeol train autoencoder --config configs/cpu-full/autoencoder.yaml --resume
+```
+
+Tasks: `heads`, `autoencoder`, `vocoder`, `pitch` (RMVPE), `ssl` (fine-tuning).
+- Each component is `freeze`, `finetune` or `scratch`. Initial weights load from local checkpoints through the license
+  gate.
+- `device: auto` picks CUDA when present, otherwise CPU in float32.
+- Runs log CSV with an ETA, validate on held-out singers, stop early, keep the best checkpoint, and end with a report
+  on unseen singers.
+
+Revision notes: `docs/revisions/` (A: analysis path, B: CPU training).
 
 ## Install
 

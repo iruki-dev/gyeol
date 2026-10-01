@@ -92,7 +92,7 @@ def fit_temperature(logits: torch.Tensor, targets: torch.Tensor, kind: str, max_
         return loss
 
     opt.step(closure)
-    return float(log_t.exp().clamp(0.05, 20.0))
+    return float(log_t.detach().exp().clamp(0.05, 20.0))
 
 
 def expected_calibration_error(probs: np.ndarray, targets: np.ndarray, n_bins: int = 15) -> float:

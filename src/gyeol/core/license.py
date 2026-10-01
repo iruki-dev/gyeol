@@ -68,8 +68,8 @@ _AIHUB_CONDITIONS = (
 )
 
 
-def _a(name, kind, tag, lic, source="", conditions=(), caveats=(), vendor_allowed=True, url=None) -> LicensedAsset:
-    return LicensedAsset(name, kind, tag, lic, source, tuple(conditions), tuple(caveats), vendor_allowed, False, url)
+def _a(name, kind, tag, lic, source="", conditions=(), caveats=(), vendor_allowed=True, url=None, verified=False) -> LicensedAsset:
+    return LicensedAsset(name, kind, tag, lic, source, tuple(conditions), tuple(caveats), vendor_allowed, verified, url)
 
 
 D, C, M = AssetKind.DATASET, AssetKind.CHECKPOINT, AssetKind.MODEL
@@ -111,7 +111,8 @@ REGISTRY: dict[str, LicensedAsset] = {
            url="https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
         _a("openvpi_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
         _a("openvpi_pc_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
-        _a("gyeol_synthetic", D, OK, "generated (no recordings, no people)", "gyeol.synth / gyeol.eval.knob_recovery"),
+        _a("gyeol_synthetic", D, OK, "generated (no recordings, no people)", "gyeol.synth / gyeol.eval.knob_recovery / gyeol.data.prepare",
+           verified=True),
         _a("own_recordings", D, OK, "in-house (user consent)", "recordings made in the gyeol app",
            conditions=("Only recordings whose owner consents to the training purpose may be used (enforced by data.adapters.scan_own).",)),
         _a("so_vits_svc", M, CL, "AGPL-3.0", "so-vits-svc", vendor_allowed=False),

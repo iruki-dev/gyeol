@@ -1,0 +1,22 @@
+# Long unattended CPU run: the NSF vocoder alone (mel + band aperiodicity + f0 → waveform).
+# Measured on 4 CPU threads: ~30 s/step with 256 channels; 128 channels cut that roughly 4× → 80k steps ≈ 1 week.
+# A vocoder needs far more steps than a CPU gives in a week: fine-tune (init) rather than train from scratch when you can.
+task: vocoder
+seed: 0
+profile: commercial
+device: auto
+threads: 0
+data:
+  cache: runs/cpu-full/cache
+  manifests: []
+  prepare: {sr: 44100, hop: 512, separation: auto, features: [dsp]}
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  crop_frames: [24, 48]
+  batch_size: 8
+  num_workers: 2
+optim: {lr: 2.0e-4, grad_accum: 2, grad_clip: 1.0, schedule: exponential, gamma: 0.99999, betas: [0.8, 0.99]}
+run: {out: runs/cpu-full/vocoder, max_steps: 80000, val_every: 2000, save_every: 500, log_every: 50, patience: 20,
+      sample_every: 5000, n_samples: 3, val_batches: 50}
+model: {size: full, n_mels: 80, channels: 128, adversarial: true, disc_channels: 16}
+components: {vocoder: scratch, discriminators: scratch}
+checkpointing: [vocoder]

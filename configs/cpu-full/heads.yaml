@@ -1,0 +1,21 @@
+# Long unattended CPU run: attribute heads on cached frame features (measured ~0.1 s/step on 4 CPU threads → ~1.5 h).
+# Prepare first (resumable):  gyeol prepare --manifest data/manifests/vocalset.json --manifest data/manifests/gtsinger.json \
+#                               --out runs/cpu-full/cache --sr 44100 --hop 512 --separation auto
+# GTSinger is CC BY-NC-SA: it needs a non-commercial profile; keep it out of commercial runs.
+task: heads
+seed: 0
+profile: commercial
+device: auto
+threads: 0
+data:
+  cache: runs/cpu-full/cache
+  manifests: []            # or list manifests here to prepare them on first use
+  prepare: {sr: 44100, hop: 512, separation: auto, features: [dsp]}
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  crop_frames: [128, 384]
+  batch_size: 16
+  num_workers: 2
+optim: {lr: 1.0e-3, weight_decay: 1.0e-4, grad_accum: 1, grad_clip: 1.0, schedule: cosine, warmup_steps: 500, betas: [0.9, 0.99]}
+run: {out: runs/cpu-full/heads, max_steps: 50000, val_every: 1000, save_every: 500, log_every: 50, patience: 10}
+model: {features: dsp, hidden: 128, dropout: 0.1}
+components: {heads: scratch}

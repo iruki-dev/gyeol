@@ -1,0 +1,19 @@
+# CPU smoke preset (see heads.yaml): a tiny wav2vec2-architecture encoder fine-tuned through the heads.
+# cpu-full/ssl.yaml fine-tunes HuBERT/WavLM base from a fetched checkpoint instead.
+task: ssl
+seed: 0
+profile: commercial
+device: auto
+threads: 2
+data:
+  cache: runs/cpu-smoke/cache
+  synthetic: {n_singers: 6, seconds: 1.2}
+  prepare: {sr: 22050, hop: 256, separation: "off", features: [dsp]}
+  split: {train: 0.6, val: 0.2, test: 0.2}
+  crop_frames: [32, 64]
+  batch_size: 4
+optim: {lr: 1.0e-3, grad_accum: 2, grad_clip: 1.0, schedule: constant}
+run: {out: runs/cpu-smoke/ssl, max_steps: 12, val_every: 6, save_every: 6, log_every: 3, patience: 4, val_batches: 3}
+model: {arch: tiny, dim: 32, layers: 2, layers_used: [0, 1], hidden: 32}
+components: {ssl: scratch, heads: scratch}
+checkpointing: [ssl]

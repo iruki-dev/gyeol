@@ -111,7 +111,10 @@ class LossWeights:
 
 
 def generator_step(model: GyeolAutoencoder, batch: AEBatch, w: LossWeights | None = None, vocode: bool = True,
-                   discriminators: list | None = None, mrstft: MultiResolutionSTFTLoss | None = None) -> dict[str, torch.Tensor]:
+                   discriminators: list | None = None, mrstft: MultiResolutionSTFTLoss | None = None,
+                   outputs: dict | None = None) -> dict[str, torch.Tensor]:
+    """Generator-side losses; if ``outputs`` is a dict, the decoded waveform and its target are stored in it
+    (``"wav"``, ``"target"``) so the caller can run the discriminator step without decoding again."""
     w = w or LossWeights()
     enc = model.encode(batch.wav, batch.c, batch.c_mask, batch.wav_for_residual)
     T = enc["mel"].shape[1]
@@ -154,6 +157,8 @@ def generator_step(model: GyeolAutoencoder, batch: AEBatch, w: LossWeights | Non
     if vocode:
         y = dec["wav"]
         x = batch.wav[:, : y.shape[1]]
+        if outputs is not None:
+            outputs["wav"], outputs["target"] = y, x
         mr = mrstft or MultiResolutionSTFTLoss().to(y.device)
         losses["stft"] = w.stft * mr(y, x, fw, model.cfg.hop)
         # re-encoding consistency on r
