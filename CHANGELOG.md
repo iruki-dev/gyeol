@@ -5,6 +5,28 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### Revision C — library boundary (see `docs/revisions/C.md`)
+- C1:
+  - User state moved out of `src/gyeol` into `reference_service/` (`gyeol_service`): the consent / storage /
+    deletion store, the coaching session (fading schedule, attempt history, self-assessment, summaries), and the
+    running phonation-time and fatigue history.
+  - The library keeps the stateless parts:
+    - consent types and guards;
+    - `coach.thresholds`, `coach.priority` and the practice map;
+    - health measures, now pure functions `phonation_warnings` and `fatigue_flags`;
+    - onboarding scoring.
+  - **Breaking:** `gyeol.store` and `gyeol.coach.session` are gone; import them from `gyeol_service`.
+- C2:
+  - `gyeol.api`: `analyze`, `compare`, `render_demo` and `train`, plus `OwnVoice`.
+  - Versioned JSON (`gyeol.representation`, `gyeol.explanation`, `gyeol.demo` v1) with JSON Schemas; biometrics are
+    left out by default.
+  - `examples/coach_demo_v2.py` uses `gyeol.api` only; the session demo moved to
+    `reference_service/examples/coach_session_demo.py`.
+  - Rendering checks the consent token against the take's owner digest.
+- C3: `Profile.PERSONAL` allows non-commercial assets. Analyses, explanations, demos, training samples, reports and
+  checkpoints carry the profile, and personal-profile checkpoints are refused under `commercial`. The commercial
+  profile is unchanged.
+
 ### Revision B — CPU training (see `docs/revisions/B.md`)
 - B1:
   - `device="auto"` resolves to CUDA when available, otherwise CPU in float32; thread count configurable.

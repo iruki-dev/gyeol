@@ -12,13 +12,9 @@ import pytest
 from gyeol.coach import (
     AttemptMetrics,
     AttributeThreshold,
-    CoachConfig,
-    CoachSession,
     DiscriminationTrial,
-    FatigueMonitor,
     IntervalTrial,
     MelodyTrial,
-    PhonationLog,
     PitchMatchTrial,
     PracticeMap,
     PriorityConfig,
@@ -34,6 +30,7 @@ from gyeol.coach import (
     score_onboarding,
 )
 from gyeol.coach.health import load_norms
+from gyeol_service import CoachConfig, CoachSession, FatigueMonitor, PhonationLog  # revision C1: session state is in the service
 from gyeol.core import Consistency, Explanation, ExplanationItem, FrameGrid, Provenance, Span
 
 GRID = FrameGrid(44100, 512, 400)
@@ -430,8 +427,8 @@ def test_coach_on_a_real_explanation():
 def test_knob_recovery_fit_and_coach_example(tmp_path, capsys):
     import importlib.util
 
-    def load(name):
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[1] / "examples" / f"{name}.py")
+    def load(name, folder="examples"):
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[1] / folder / f"{name}.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
@@ -441,7 +438,9 @@ def test_knob_recovery_fit_and_coach_example(tmp_path, capsys):
     ts = ThresholdSet.from_json(th)
     assert ts.provenance["synthetic"] is True and ts.lookup("intonation_offset").usable
     assert ts.lookup("onset_timing").uncertainty(1.0) > 0
-    assert load("coach_demo_v2").main(["--synthetic", "--out", str(tmp_path), "--coach", str(th), "--noticed", "pitch"]) == 0
+    # revision C1: the coaching session is service state; its example lives in the reference service
+    demo = load("coach_session_demo", "reference_service/examples")
+    assert demo.main(["--synthetic", "--out", str(tmp_path), "--coach", str(th), "--noticed", "pitch"]) == 0
     out = capsys.readouterr().out
     assert "먼저 들어 볼 부분" in out and "센트 낮아요" in out and "합성 데이터" in out and "이비인후과" in out
     assert "스스로 느낀 부분이 맞아요" in out and "2번 부른 결과" in out

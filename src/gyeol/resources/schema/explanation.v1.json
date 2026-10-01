@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gyeol.explanation.v1",
+  "title": "gyeol explanation (user take(s) compared with a target)",
+  "type": "object",
+  "required": ["schema", "version", "grid", "warp", "transposition_cents", "items", "cannot_judge", "n_takes", "premises", "withheld",
+               "comparison_mode", "meta"],
+  "properties": {
+    "schema": {"const": "gyeol.explanation"},
+    "version": {"const": 1},
+    "grid": {"type": "object", "required": ["sr", "hop", "n_frames"]},
+    "warp": {"type": "array", "items": {"$ref": "#/$defs/num"}},
+    "transposition_cents": {"description": "null when the octave/key relation could not be established", "$ref": "#/$defs/num"},
+    "items": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+    "cannot_judge": {"type": "array", "items": {"$ref": "#/$defs/span"}},
+    "n_takes": {"type": "integer", "minimum": 1},
+    "premises": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object", "required": ["name", "statement", "passed", "reason", "measures"],
+        "properties": {"name": {"type": "string"}, "statement": {"type": "string"}, "passed": {"type": "boolean"},
+                       "reason": {"type": "string"}, "measures": {"type": "object"}}
+      }
+    },
+    "withheld": {
+      "type": "array",
+      "items": {"type": "object", "required": ["category", "attribute", "target_note", "premise", "reason"]}
+    },
+    "comparison_mode": {
+      "type": "object",
+      "properties": {"timing": {"enum": ["shared_clock", "content_aligned"]}, "pitch": {"enum": ["absolute", "octave_invariant"]}}
+    },
+    "meta": {"type": "object"}
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "span": {"type": "object", "required": ["start", "end"],
+             "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}, "syllables": {"type": "array", "items": {"type": "string"}},
+                            "reason": {"type": "string"}}},
+    "item": {
+      "type": "object",
+      "required": ["category", "attribute", "spans", "magnitude", "unit", "confidence", "consistency", "detail"],
+      "properties": {
+        "category": {"enum": ["pitch", "rhythm", "ornament", "phonation", "diction", "dynamics"]},
+        "attribute": {"type": "string"},
+        "spans": {"type": "array", "items": {"$ref": "#/$defs/span"}},
+        "magnitude": {"$ref": "#/$defs/num"},
+        "unit": {"type": "string"},
+        "confidence": {"$ref": "#/$defs/num"},
+        "consistency": {"enum": ["style_or_habit", "error", "undetermined"]},
+        "delta": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"$ref": "#/$defs/num"}}]},
+        "audibility": {"$ref": "#/$defs/num"},
+        "detail": {"type": "object"}
+      }
+    }
+  }
+}

@@ -31,6 +31,10 @@ class LicenseTag(str, Enum):
 class Profile(str, Enum):
     COMMERCIAL = "commercial"
     RESEARCH = "research"
+    #: personal, non-commercial use (revision C3): non-commercial assets such as the openvpi vocoder
+    #: weights or GTSinger are allowed; checkpoints and outputs made under it carry the profile tag and
+    #: are refused under the commercial profile
+    PERSONAL = "personal"
 
 
 class AssetKind(str, Enum):
@@ -138,6 +142,20 @@ def decide(asset: LicensedAsset, profile: Profile) -> LicenseDecision:
         if asset.tag is LicenseTag.COMMERCIAL_OK_CONDITIONAL:
             return LicenseDecision(True, "commercial use permitted under conditions", list(asset.conditions) + notices)
         return LicenseDecision(False, f"{asset.name!r} is tagged {asset.tag.value} ({asset.license}); refused under the commercial profile", notices)
+    if profile is Profile.PERSONAL:
+        if asset.tag is LicenseTag.COMMERCIAL_OK:
+            return LicenseDecision(True, "commercial_ok", notices)
+        if asset.tag is LicenseTag.COMMERCIAL_OK_CONDITIONAL:
+            return LicenseDecision(True, "permitted under conditions", list(asset.conditions) + notices)
+        if asset.tag is LicenseTag.NONCOMMERCIAL:
+            notices.append(f"{asset.name!r} is non-commercial ({asset.license}): personal, non-commercial use only; "
+                           "everything derived from it is tagged with the personal profile")
+            return LicenseDecision(True, "non-commercial asset under the personal profile", notices)
+        if asset.tag is LicenseTag.COPYLEFT:
+            notices.append(f"{asset.name!r} is copyleft ({asset.license}); do not vendor or link it into distributed code")
+            return LicenseDecision(True, "copyleft asset under the personal profile", notices)
+        return LicenseDecision(False, f"{asset.name!r} has an unknown license ({asset.license}); refused under the personal profile "
+                                      "(use the research profile for research-only material)", notices)
     # research profile: everything loads, with notices
     if asset.tag is LicenseTag.COPYLEFT:
         notices.append(f"{asset.name!r} is copyleft ({asset.license}); do not vendor or link it into distributed code")

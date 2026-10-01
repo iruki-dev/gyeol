@@ -288,6 +288,13 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
                                 {"timing": timing_mode, "pitch": pitch_mode}))
 
 
+def _profile_of(reps: list[Representation]) -> str:
+    """The most restrictive profile among the inputs (personal > research > commercial)."""
+    order = ("commercial", "research", "personal")
+    ps = [r.meta.get("profile", "commercial") for r in reps]
+    return max(ps, key=lambda p: order.index(p) if p in order else len(order))
+
+
 def explain(user_takes: list[Representation], target: Representation, config: ExplainConfig | None = None,
             lyrics: str | None = None) -> Result[Explanation]:
     """Explain the user's take(s) against the target phrase.
@@ -332,7 +339,7 @@ def explain(user_takes: list[Representation], target: Representation, config: Ex
         grid=last.rep.grid, warp=last.warp.tau, transposition_cents=last.transposition, items=items,
         cannot_judge=sorted(last.cannot, key=lambda s: s.start), n_takes=len(takes),
         meta={"failed_takes": failures, "warp_confidence": last.warp.confidence, "user_quality": last.rep.quality,
-              "target_quality": target.quality, "syllables": syllables},
+              "target_quality": target.quality, "syllables": syllables, "profile": _profile_of(list(user_takes) + [target])},
         premises=last.premises, withheld=last.withheld, comparison_mode=last.modes,
     )
     return Result(Result.success(exp).status, exp, "", failures)

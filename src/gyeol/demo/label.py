@@ -39,7 +39,7 @@ class LabelledAudio:
 
 
 def label_ai_generated(audio: np.ndarray, sr: int, *, voice: ConsentedVoice, renderer: str, description: dict,
-                       watermark: WatermarkHook) -> LabelledAudio:
+                       watermark: WatermarkHook, profile: str = "commercial") -> LabelledAudio:
     from .. import __version__
 
     marked = watermark.embed(np.asarray(audio, float), sr)
@@ -54,6 +54,7 @@ def label_ai_generated(audio: np.ndarray, sr: int, *, voice: ConsentedVoice, ren
         "source_recording_id": voice.recording_id,
         "watermark": watermark.describe(),
         "edits": description,
+        "profile": profile,  # revision C3: license profile the demo was produced under
     }
     return LabelledAudio(marked, sr, meta)
 

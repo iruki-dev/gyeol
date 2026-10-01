@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gyeol.representation.v1",
+  "title": "gyeol representation (interpretable layer of one recording)",
+  "type": "object",
+  "required": ["schema", "version", "grid", "recording_id", "provenance", "curves", "events", "quality", "meta"],
+  "properties": {
+    "schema": {"const": "gyeol.representation"},
+    "version": {"const": 1},
+    "grid": {"$ref": "#/$defs/grid"},
+    "recording_id": {"type": "string"},
+    "provenance": {"enum": ["user", "reference", "synthetic", "unknown"]},
+    "curves": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["unit", "values", "confidence"],
+        "properties": {
+          "unit": {"type": "string"},
+          "labels": {"type": "array", "items": {"type": "string"}},
+          "values": {"type": "array", "items": {"anyOf": [{"$ref": "#/$defs/num"}, {"type": "array", "items": {"$ref": "#/$defs/num"}}]}},
+          "confidence": {"type": "array", "items": {"$ref": "#/$defs/num"}},
+          "meta": {"type": "object"}
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "start", "end", "magnitude", "confidence"],
+        "properties": {"kind": {"type": "string"}, "start": {"type": "integer"}, "end": {"type": "integer"},
+                       "magnitude": {"$ref": "#/$defs/num"}, "confidence": {"$ref": "#/$defs/num"}, "meta": {"type": "object"}}
+      }
+    },
+    "quality": {"type": "object"},
+    "meta": {"type": "object", "properties": {"profile": {"enum": ["commercial", "research", "personal"]}}},
+    "env": {"anyOf": [{"type": "null"}, {"type": "array"}]},
+    "singer": {"description": "biometric; present only when explicitly requested", "anyOf": [{"type": "null"}, {"type": "object"}]},
+    "residual": {"description": "biometric; present only when explicitly requested", "anyOf": [{"type": "null"}, {"type": "array"}]}
+  },
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "grid": {"type": "object", "required": ["sr", "hop", "n_frames"],
+             "properties": {"sr": {"type": "integer", "minimum": 1}, "hop": {"type": "integer", "minimum": 1}, "n_frames": {"type": "integer", "minimum": 0}}}
+  }
+}

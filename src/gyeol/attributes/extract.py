@@ -18,6 +18,7 @@ the per-frame SNR factor, and clipping zeroes aperiodicity confidence.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -25,6 +26,7 @@ from typing import Sequence
 import numpy as np
 
 from ..align.content import ContentFeatures, MFCCContent
+from ..core.consent import Provenance
 from ..core.containers import AttributeCurve, AttributeCurves, Recording, Representation
 from ..core.grid import DEFAULT_HOP, FrameGrid
 from ..core.license import Profile
@@ -216,6 +218,10 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
               "failed_trackers": p.failed_trackers, "octave_repaired_fraction": float(p.octave_repaired[voiced].mean())},
     )
     rep.meta["analysis_signal"] = "separated vocal" if sep_report.get("applied") else "input"
+    rep.meta["profile"] = Profile(cfg.profile).value  # revision C3: outputs carry the license profile
+    if recording.provenance is Provenance.USER and recording.owner_id:
+        # whose voice this is, without the id in clear (PIPA): rendering checks it against the consent token
+        rep.meta["owner_sha256"] = hashlib.sha256(recording.owner_id.encode()).hexdigest()
     if cfg.keep_separated_audio and sep_report.get("applied"):
         rep.meta["separated_audio"] = x
     warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings + sep_warnings

@@ -85,6 +85,8 @@ def load_checkpoint(path: str | Path, profile: Profile | str, *, map_location: s
         config_hash=meta["config_hash"], profile=Profile(meta["profile"]), conditions=list(meta.get("conditions", [])),
     )
     require_allowed(info.as_asset(), Profile(profile))
+    if Profile(profile) is Profile.COMMERCIAL and info.profile is Profile.PERSONAL:
+        raise LicenseError(f"{path}: produced under the {info.profile.value} profile; refused under the commercial profile")
     return blob["state_dict"], info
 
 

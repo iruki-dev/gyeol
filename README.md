@@ -45,7 +45,7 @@ python examples/coach_demo_v2.py --synthetic --out /tmp/gyeol_demo
 python examples/coach_demo_v2.py --synthetic --audibility --render-demo --out /tmp/gyeol_demo
 # coaching: fit display thresholds (synthetic knob recovery), then coach each take as an attempt
 python examples/fit_thresholds.py --synthetic --out /tmp/gyeol_demo/thresholds.json
-python examples/coach_demo_v2.py --synthetic --coach /tmp/gyeol_demo/thresholds.json --noticed pitch
+python reference_service/examples/coach_session_demo.py --synthetic --coach /tmp/gyeol_demo/thresholds.json --noticed pitch
 # discovery: SAE, conditional directions, transfer tests and promotion
 python examples/discover_demo.py --out /tmp/gyeol_discover
 # evaluation and hardening: robustness grid, ONNX export + latency, model card (needs the [onnx] extra)
@@ -56,6 +56,28 @@ gyeol eval realset /path/to/realset --split held_out --per-tracker
 # optional: vocal separation weights for analyze(separation="auto") (shows the license, asks first)
 gyeol fetch bs_roformer_viperx_ep317
 ```
+
+## Public API
+
+```python
+from gyeol import api
+
+target = api.analyze("guide.wav", role="reference", lyrics="사랑해요 그대").unwrap()
+take = api.analyze("take.wav", owner_id="user-42", reference="guide.wav").unwrap()   # latency refined against the guide
+exp = api.compare([take], target).unwrap()
+api.to_json(exp, "explanation.json")          # versioned JSON: gyeol.explanation v1 (schemas in gyeol/resources/schema)
+# own-voice demo: only the user's own take, only with their voice_synthesis consent; AI-labelled and watermarked
+x, sr = api.load_audio("take.wav")
+demo = api.render_demo(api.OwnVoice(x, sr, take, token), exp, target, out_dir="demo/").unwrap()
+run = api.train("configs/cpu-smoke/heads.yaml")
+```
+
+`gyeol` is stateless. Consent records, storage and deletion, and coaching sessions (attempt history, feedback
+fading) live in the reference service package `reference_service/` (`gyeol_service`). Profiles:
+- `commercial` (default): only commercially usable assets.
+- `personal`: also allows non-commercial assets such as the openvpi vocoder weights or GTSinger. Everything made
+  under it is tagged with the profile and is refused under `commercial`.
+- `research`: research use.
 
 ## Train on a CPU (or a GPU)
 
@@ -76,7 +98,7 @@ Tasks: `heads`, `autoencoder`, `vocoder`, `pitch` (RMVPE), `ssl` (fine-tuning).
 - Runs log CSV with an ETA, validate on held-out singers, stop early, keep the best checkpoint, and end with a report
   on unseen singers.
 
-Revision notes: `docs/revisions/` (A: analysis path, B: CPU training).
+Revision notes: `docs/revisions/` (A: analysis path, B: CPU training, C: library boundary).
 
 ## Install
 

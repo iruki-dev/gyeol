@@ -23,7 +23,7 @@ from gyeol.dsp.weak_labels import WeakLabelConfig, robust_formants
 from gyeol.frontend import effective_bandwidth, estimate_t60
 from gyeol.io import save_audio
 from gyeol.pitch.consensus import consensus
-from gyeol.store import ConsentStore
+from gyeol_service.store import ConsentStore
 from gyeol.synth import SynthNote, melody, sung_vowel
 
 from .helpers import SR, dsp_trackers

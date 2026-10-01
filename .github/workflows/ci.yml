@@ -20,8 +20,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,onnx,train]"
+          pip install -e reference_service
       - name: Ruff
-        run: ruff check src tests examples
+        run: ruff check src tests examples reference_service
       - name: Pytest (includes the interrupt/resume equivalence test for every training task)
         run: pytest
       - name: CPU smoke training (every task, then an interrupted + resumed run)

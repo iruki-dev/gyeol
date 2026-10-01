@@ -97,7 +97,9 @@ def render_demo(voice: ConsentedVoice, take: UserTake, exp: Explanation, target:
     base = renderer.render(voice, take, None, seed=seed)
     if not base.ok:
         return Result.failure(f"baseline render failed: {base.reason}")
-    lab = lambda y, d: label_ai_generated(y, take.recording.sr, voice=voice, renderer=renderer.name, description=d, watermark=wm)  # noqa: E731
+    profile = exp.meta.get("profile", take.rep.meta.get("profile", "commercial"))
+    lab = lambda y, d: label_ai_generated(y, take.recording.sr, voice=voice, renderer=renderer.name, description=d, watermark=wm,  # noqa: E731
+                                          profile=profile)
     out = []
     for st in steps:
         e = edits[st.selected]

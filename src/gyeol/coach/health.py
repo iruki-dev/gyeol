@@ -6,13 +6,17 @@
 * **Beginner restrictions** (:func:`restricted_for_level`): rough voice, fry
   and pressed/belt qualities, and chest-register targets above the user's
   tessitura (high belting), are never coached for beginners.
-* **Phonation time** (:class:`PhonationLog`): accumulated *voiced* time per
-  session and per day, with warnings.
-* **Fatigue within a session** (:class:`FatigueMonitor`): rising f0
-  instability, a falling top of range, increasing breath noise — each judged
-  against the session's own attempt-to-attempt noise.
-* A persistent medical-referral notice (Korean resource string) that every
-  feedback carries.
+* **Phonation time** (:func:`phonation_warnings`): warnings from the voiced
+  time accumulated in a session and a day (:func:`voiced_seconds` measures one
+  attempt; the accumulation is user state and lives in the service layer —
+  ``reference_service/gyeol_service/wellbeing.py``).
+* **Fatigue within a session** (:func:`fatigue_flags`): rising f0
+  instability, a falling top of range, increasing breath noise across a
+  sequence of :class:`AttemptMetrics` — each judged against the session's own
+  attempt-to-attempt noise.
+
+Revision C1: every function here is stateless; attempt histories, phonation
+logs and the medical-referral notice text belong to the service.
 
 Limits and defaults come from ``resources/coach/norms.json`` (policy data,
 provisional until reviewed); nothing here diagnoses anything.
@@ -21,9 +25,10 @@ provisional until reviewed); nothing here diagnoses anything.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
+from typing import Sequence
 
 import numpy as np
 
@@ -144,27 +149,18 @@ def restricted_for_level(item: ExplanationItem, level: str, vr: VoiceRange | Non
 # ---------------------------------------------------------------- phonation time
 
 
-@dataclass
-class PhonationLog:
-    """Accumulated voiced seconds per session and per day (``day`` is any label, e.g. an ISO date)."""
-
-    session_s: float = 0.0
-    by_day: dict[str, float] = field(default_factory=dict)
-
-    def add(self, voiced_seconds: float, day: str) -> None:
-        if voiced_seconds < 0 or not np.isfinite(voiced_seconds):
-            raise ValueError("voiced_seconds must be a finite, non-negative number")
-        self.session_s += voiced_seconds
-        self.by_day[day] = self.by_day.get(day, 0.0) + voiced_seconds
-
-    def warnings(self, day: str) -> list[str]:
-        h = load_norms()["health"]
-        out = []
-        if self.session_s >= h["session_phonation_warn_s"]:
-            out.append("phonation_session")
-        if self.by_day.get(day, 0.0) >= h["daily_phonation_warn_s"]:
-            out.append("phonation_daily")
-        return out
+def phonation_warnings(session_s: float, day_s: float) -> list[str]:
+    """``phonation_session`` / ``phonation_daily`` when the accumulated voiced time reaches the norms."""
+    for v in (session_s, day_s):
+        if v < 0 or not np.isfinite(v):
+            raise ValueError("voiced time must be a finite, non-negative number")
+    h = load_norms()["health"]
+    out = []
+    if session_s >= h["session_phonation_warn_s"]:
+        out.append("phonation_session")
+    if day_s >= h["daily_phonation_warn_s"]:
+        out.append("phonation_daily")
+    return out
 
 
 def voiced_seconds(rep: Representation) -> float:
@@ -197,33 +193,28 @@ def attempt_metrics(rep: Representation, min_confidence: float = 0.5) -> Attempt
     return AttemptMetrics(inst, top, breath)
 
 
-@dataclass
-class FatigueMonitor:
-    history: list[AttemptMetrics] = field(default_factory=list)
+def _trend_z(x: np.ndarray, window: int) -> float:
+    x = x[np.isfinite(x)]
+    if len(x) < 2 * window:
+        return 0.0
+    d2 = x[2:] - 2 * x[1:-1] + x[:-2]  # insensitive to a linear trend
+    noise = max(1.4826 * float(np.median(np.abs(d2))) / np.sqrt(6.0), 1e-9 * (1.0 + float(np.max(np.abs(x)))))
+    return float((np.median(x[-window:]) - np.median(x[:window])) / noise)
 
-    def add(self, m: AttemptMetrics) -> None:
-        self.history.append(m)
 
-    @staticmethod
-    def _z(x: np.ndarray, window: int) -> float:
-        x = x[np.isfinite(x)]
-        if len(x) < 2 * window:
-            return 0.0
-        d2 = x[2:] - 2 * x[1:-1] + x[:-2]  # insensitive to a linear trend
-        noise = max(1.4826 * float(np.median(np.abs(d2))) / np.sqrt(6.0), 1e-9 * (1.0 + float(np.max(np.abs(x)))))
-        return float((np.median(x[-window:]) - np.median(x[:window])) / noise)
-
-    def flags(self) -> list[str]:
-        h = load_norms()["health"]
-        if len(self.history) < h["fatigue_min_attempts"]:
-            return []
-        w, zc = int(h["fatigue_window"]), float(h["fatigue_z"])
-        col = lambda name: np.array([getattr(m, name) for m in self.history], float)  # noqa: E731
-        out = []
-        if self._z(col("instability_cents"), w) > zc:
-            out.append("fatigue_instability")
-        if self._z(col("top_cents"), w) < -zc:
-            out.append("fatigue_top_range")
-        if self._z(col("breath_db"), w) > zc:
-            out.append("fatigue_breath")
-        return out
+def fatigue_flags(history: Sequence[AttemptMetrics]) -> list[str]:
+    """Fatigue signs across a session's attempts (oldest first): ``fatigue_instability``, ``fatigue_top_range``,
+    ``fatigue_breath``.  Each compares the last and first ``fatigue_window`` attempts against the session's own noise."""
+    h = load_norms()["health"]
+    if len(history) < h["fatigue_min_attempts"]:
+        return []
+    w, zc = int(h["fatigue_window"]), float(h["fatigue_z"])
+    col = lambda name: np.array([getattr(m, name) for m in history], float)  # noqa: E731
+    out = []
+    if _trend_z(col("instability_cents"), w) > zc:
+        out.append("fatigue_instability")
+    if _trend_z(col("top_cents"), w) < -zc:
+        out.append("fatigue_top_range")
+    if _trend_z(col("breath_db"), w) > zc:
+        out.append("fatigue_breath")
+    return out

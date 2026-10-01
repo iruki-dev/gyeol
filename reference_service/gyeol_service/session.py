@@ -1,5 +1,11 @@
 """Coaching session: what to say after each attempt, and when to stay quiet.
 
+Reference service layer (revision C1): this module holds **user state** — the
+attempt history, the feedback fading schedule, self-assessment and session
+summaries — on top of the stateless library (:mod:`gyeol.coach` thresholds,
+priority, health measures, practice map).  It is one way to build the app's
+session logic, not part of the ``gyeol`` package.
+
 Per attempt (:meth:`CoachSession.new_attempt` → :class:`Attempt`):
 
 1. **filter** — every item must pass its fitted operating threshold
@@ -35,19 +41,21 @@ from typing import Iterable
 
 import numpy as np
 
-from ..core.containers import Consistency, Explanation, ExplanationItem
-from ..explain.render_text import explanation_notes, item_text, load_strings
-from .health import AttemptMetrics, FatigueMonitor, PhonationLog, PhraseCheck, VoiceRange, check_phrase, restricted_for_level
-from .practice import Exercise, PracticeMap
-from .priority import PriorityConfig, RankedItem, rank
-from .thresholds import ThresholdSet
+from gyeol.coach.health import AttemptMetrics, PhraseCheck, VoiceRange, check_phrase, restricted_for_level
+from gyeol.coach.practice import Exercise, PracticeMap
+from gyeol.coach.priority import PriorityConfig, RankedItem, rank
+from gyeol.coach.thresholds import ThresholdSet
+from gyeol.core.containers import Consistency, Explanation, ExplanationItem
+from gyeol.explain.render_text import explanation_notes, item_text, load_strings
+
+from .wellbeing import FatigueMonitor, PhonationLog
 
 SELF_ASSESSMENT_OPTIONS = ("pitch", "rhythm", "ornament", "dynamics", "phonation", "diction", "nothing")
 
 
 @lru_cache(maxsize=4)
 def coach_strings(lang: str = "ko") -> dict:
-    return json.loads(resources.files("gyeol").joinpath(f"resources/{lang}/coach.json").read_text(encoding="utf-8"))
+    return json.loads(resources.files("gyeol_service").joinpath(f"resources/{lang}/coach.json").read_text(encoding="utf-8"))
 
 
 @dataclass

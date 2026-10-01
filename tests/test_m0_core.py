@@ -215,7 +215,7 @@ def test_representation_rejects_provenance_mismatch():
 # --- store -----------------------------------------------------------------
 
 def test_consent_store_features_and_deletion(tmp_path):
-    from gyeol.store import ConsentStore, FeatureStore, delete_user
+    from gyeol_service.store import ConsentStore, FeatureStore, delete_user
 
     cs = ConsentStore(tmp_path)
     fs = FeatureStore(tmp_path, cs)
@@ -239,7 +239,7 @@ def test_consent_store_features_and_deletion(tmp_path):
 
 
 def test_raw_audio_retention(tmp_path):
-    from gyeol.store import ConsentStore, RawAudioRetention, RawAudioStore, RetentionPolicy
+    from gyeol_service.store import ConsentStore, RawAudioRetention, RawAudioStore, RetentionPolicy
 
     cs = ConsentStore(tmp_path)
     cs.grant("u1", {Purpose.STORAGE})

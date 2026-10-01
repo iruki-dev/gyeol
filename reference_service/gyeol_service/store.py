@@ -1,4 +1,9 @@
-"""Consent-aware storage for voice-derived data.
+"""Consent-aware storage for voice-derived data (reference service layer, revision C1).
+
+User state — consent records, stored features, raw audio and their deletion —
+lives here, outside the stateless ``gyeol`` library.  The library keeps the
+consent *types and guards* (:class:`gyeol.core.ConsentToken`,
+:class:`gyeol.core.ConsentedVoice`, :func:`gyeol.core.require_consented_voice`).
 
 Singer vectors, embeddings and attribute features derived from a voice are
 treated as sensitive biometric information (PIPA).  This module provides
@@ -29,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..core.consent import ConsentError, ConsentToken, Purpose
+from gyeol.core.consent import ConsentError, ConsentToken, Purpose
 
 _USER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
