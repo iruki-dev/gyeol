@@ -3,8 +3,7 @@
 * :class:`SingerEncoder` — utterance embedding (attentive statistics
   pooling), trained with a same-singer supervised-contrastive loss across
   songs.  :func:`singer_vector` wraps the output in a
-  :class:`~gyeol.core.consent.SingerVector` carrying the source recording's
-  provenance, so reference vectors can never become renderable voices.
+  :class:`~gyeol.core.SingerVector` with the source recording's id.
 * :class:`EnvEncoder` — utterance env vector plus supervised heads for the
   augmentation labels (noise, room, EQ, codec, compression, separation).
 * :class:`ResidualEncoder` — narrow frame-level bottleneck with a
@@ -21,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..core.consent import SingerVector
+from ..core.containers import SingerVector
 from ..core.containers import Recording
 
 
@@ -95,10 +94,10 @@ def supervised_contrastive(emb: torch.Tensor, labels: torch.Tensor, temperature:
 
 @torch.no_grad()
 def singer_vector(encoder: SingerEncoder, mel: np.ndarray, recording: Recording) -> SingerVector:
-    """Embed one recording; the vector inherits the recording's provenance and owner."""
+    """Embed one recording."""
     encoder.eval()
     v = encoder(torch.tensor(mel, dtype=torch.float32)[None])[0].numpy()
-    return SingerVector(v, recording.provenance, recording.recording_id, owner_id=recording.owner_id)
+    return SingerVector(v, recording.recording_id)
 
 
 ENV_HEADS = {"noise": 4, "room": 4, "eq": 2, "codec": 5, "compression": 2, "separation": 2}
@@ -160,9 +159,8 @@ def ltas_singer_vector(recording: Recording, n_bands: int = 32, voiced: np.ndarr
     """A **DSP** timbre descriptor (long-term average spectrum in mel bands, dB,
     mean-removed) wrapped as a :class:`SingerVector`.
 
-    It is not a learned identity embedding: it exists so the DSP renderer can
-    be consent-gated exactly like the neural one before a singer encoder is
-    trained.  Provenance and owner are inherited from the recording.
+    It is not a learned identity embedding: a weight-free timbre summary
+    usable before a singer encoder is trained.
     """
     from .mel import LogMel
 
@@ -171,4 +169,4 @@ def ltas_singer_vector(recording: Recording, n_bands: int = 32, voiced: np.ndarr
         v = np.asarray(voiced, bool)[: len(mel)]
         mel = mel[: len(v)][v] if v.any() else mel
     ltas = mel.mean(axis=0)
-    return SingerVector(ltas - ltas.mean(), recording.provenance, recording.recording_id, owner_id=recording.owner_id)
+    return SingerVector(ltas - ltas.mean(), recording.recording_id)

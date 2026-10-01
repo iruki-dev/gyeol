@@ -17,7 +17,7 @@ uncertainty** at its confidence::
 Both come from validation data (:func:`fit_attribute_threshold`).  An
 attribute without a fitted threshold is **not shown** — the policy has no
 numeric fallback.  Thresholds are stored as JSON with their provenance, and
-every :class:`~gyeol.coach.session.Feedback` carries it, so thresholds fitted
+every ``Feedback`` of the reference coaching session (``gyeol_service.session``) carries it, so thresholds fitted
 on synthetic data cannot pass for validated ones silently.
 """
 

@@ -18,9 +18,17 @@ jobs:
       - name: Install (CPU torch)
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev,onnx]"
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,onnx,train]"
+          pip install -e reference_service
       - name: Ruff
-        run: ruff check src tests examples
-      - name: Pytest
+        run: ruff check src tests examples reference_service
+      - name: Pytest (includes the interrupt/resume equivalence test for every training task)
         run: pytest
+      - name: CPU smoke training (every task, then an interrupted + resumed run)
+        run: |
+          for t in heads autoencoder vocoder pitch ssl; do
+            gyeol train $t --config configs/cpu-smoke/$t.yaml --device cpu
+          done
+          gyeol train heads --config configs/cpu-smoke/heads.yaml --out runs/cpu-smoke/heads-resume --stop-after 20 || test $? -eq 3
+          gyeol train heads --config configs/cpu-smoke/heads.yaml --out runs/cpu-smoke/heads-resume --resume

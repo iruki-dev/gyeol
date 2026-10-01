@@ -262,11 +262,9 @@ def test_residual_monitor_flags_coverage_gaps_and_trends():
 
 
 def test_representation_residual_energy_needs_a_residual():
-    from gyeol.core import Provenance
-
     from .helpers import make_melody, rep_of
 
-    rep = rep_of(make_melody(dur=0.3, gap=0.1).audio, Provenance.SYNTHETIC).unwrap()
+    rep = rep_of(make_melody(dur=0.3, gap=0.1).audio).unwrap()
     with pytest.raises(ValueError, match="residual"):
         representation_residual_energy(rep)
     rep.residual = np.ones((rep.grid.n_frames, 3))

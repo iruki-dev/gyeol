@@ -9,7 +9,7 @@
 2. **Export** — attribute heads, RMVPE network, acoustic model, vocoder harmonic path and singer encoder to
    ONNX, each verified against PyTorch at two input sizes; then latency (PyTorch eager vs ONNX Runtime) for
    1, 5 and 10 s of audio, plus the signal-layer stage profile.
-3. **Model card** — a (synthetic-data) heads checkpoint with its license lineage, carrying the robustness
+3. **Model card** — a (synthetic-data) heads checkpoint with its provenance, carrying the robustness
    results as its evaluation table.
 
 The networks are **untrained**: the latency numbers are real, the outputs are not.
@@ -26,7 +26,7 @@ import torch
 
 from gyeol.attributes.extract import analyze
 from gyeol.attributes.heads import FrameHeads, default_tasks
-from gyeol.core import Profile, Provenance, Recording
+from gyeol.core import Recording
 from gyeol.decoder import AutoencoderConfig, GyeolAutoencoder
 from gyeol.eval import EvalTable, GridItem, card_from_checkpoint, robustness_grid, run_robustness
 from gyeol.export import export_autoencoder, export_heads, export_rmvpe, pipeline_profile, profile, profile_onnx
@@ -53,7 +53,7 @@ def robustness(out: Path) -> dict:
         u = _melody(d, sh, seed=i + 1)
         n = max(len(tgt), len(u))
         t, uu = np.pad(tgt, (0, n - len(tgt))), np.pad(u, (0, n - len(u)))
-        target = analyze(Recording(t, 44100, Provenance.REFERENCE), trackers=TRACKERS).unwrap()
+        target = analyze(Recording(t, 44100), trackers=TRACKERS).unwrap()
         items.append(GridItem(f"perf{i}", uu, 44100, target, t))
     rep = run_robustness(items, robustness_grid("short"), analyzer=lambda r: analyze(r, trackers=TRACKERS), n_boot=100)
     lines = [ln for ln in rep.summary() if "intonation_offset/1" in ln or "onset_timing/2" in ln]
@@ -112,14 +112,14 @@ def model_card(out: Path, metrics: dict) -> None:
     print("3) model card")
     heads = FrameHeads(40, default_tasks(), hidden=64)
     save_checkpoint(out / "heads_demo.pt", heads.state_dict(), name="gyeol-heads-demo", sources=["gyeol_synthetic"],
-                    config={"hidden": 64, "tasks": sorted(default_tasks())}, profile=Profile.COMMERCIAL)
+                    config={"hidden": 64, "tasks": sorted(default_tasks())})
     card = card_from_checkpoint(
         out / "heads_demo.pt", component="attribute heads (register / phonation / laryngeal)",
-        architecture="temporal-conv trunk + linear heads, temperature scaling, Mahalanobis OOD", profile=Profile.COMMERCIAL,
+        architecture="temporal-conv trunk + linear heads, temperature scaling, Mahalanobis OOD",
         intended_use=["Frame-level phonation posteriors that feed coaching explanations (tentative wording)."],
         evaluation=[EvalTable("explanation robustness (short grid)", metrics, synthetic=True, data="4 synthetic performances")],
         limitations=["Untrained demo checkpoint; all evaluation shown is on synthetic data.",
-                     "License tags come from gyeol's registry and were not re-verified upstream by this code."])
+                     "Source licenses are copied from gyeol's asset list; check them upstream before relying on them."])
     (out / "model_card.md").write_text(card.to_markdown(), encoding="utf-8")
     print(f"   wrote {out / 'model_card.md'} (validation problems: {card.validate() or 'none'})")
 

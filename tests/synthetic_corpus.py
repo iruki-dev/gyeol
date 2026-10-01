@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from gyeol.attributes.extract import analyze
-from gyeol.core import Provenance, Recording
+from gyeol.core import Recording
 from gyeol.encoders import DSPFrameFeatures
 from gyeol.synth import VOWELS, sung_vowel
 from gyeol.train.heads import FrameExample
@@ -39,7 +39,7 @@ def examples(items, encoder=None):
     enc = encoder or DSPFrameFeatures()
     exs, reps = [], []
     for it in items:
-        rep = analyze(Recording(it["audio"], SR, Provenance.SYNTHETIC), trackers=dsp_trackers()).unwrap()
+        rep = analyze(Recording(it["audio"], SR), trackers=dsp_trackers()).unwrap()
         f = enc.from_representation(rep)
         voiced = np.isfinite(rep.curves["f0_cents"].values)
         reg = np.where(voiced, it["register"], -1)

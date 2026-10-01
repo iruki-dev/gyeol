@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gyeol.demo.v2",
+  "title": "gyeol demo metadata (no audio)",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "sr",
+    "renderer",
+    "steps"
+  ],
+  "properties": {
+    "schema": {
+      "const": "gyeol.demo"
+    },
+    "version": {
+      "const": 2
+    },
+    "selected_item": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array"
+        }
+      ]
+    },
+    "sr": {
+      "type": "integer"
+    },
+    "renderer": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "alpha",
+          "selected",
+          "clamped_fraction",
+          "applied"
+        ]
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

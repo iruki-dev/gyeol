@@ -39,6 +39,9 @@ class WarpConfig:
     min_slope: float = 0.25
     max_slope: float = 4.0
     contrast_for_full_confidence: float = 0.4
+    #: subsequence alignment: the user may start anywhere in the target (a hand-trimmed clip);
+    #: used for content-based alignment when the recordings do not share a clock (revision A3)
+    open_begin: bool = False
 
 
 @dataclass
@@ -69,8 +72,12 @@ def _cosine_cost(U: np.ndarray, T: np.ndarray) -> np.ndarray:
     return 1.0 - Un @ Tn.T
 
 
-def banded_dtw(U: np.ndarray, T: np.ndarray, band: int, penalty: float) -> tuple[np.ndarray, np.ndarray]:
-    """Path (list of (u, t)) and local cost along it; |u − t| ≤ band."""
+def banded_dtw(U: np.ndarray, T: np.ndarray, band: int, penalty: float, open_begin: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Path (list of (u, t)) and local cost along it; |u − t| ≤ band.
+
+    ``open_begin``: the first user frame may match any target frame (subsequence DTW);
+    the end is always open on the target side (best target frame for the last user frame).
+    """
     nu, nt = len(U), len(T)
     C = np.full((nu, nt), np.inf)
     for u in range(nu):
@@ -81,6 +88,8 @@ def banded_dtw(U: np.ndarray, T: np.ndarray, band: int, penalty: float) -> tuple
     pen = penalty * med
     D = np.full((nu + 1, nt + 1), np.inf)
     D[0, 0] = 0.0
+    if open_begin:
+        D[0, :] = 0.0
     move = np.zeros((nu, nt), dtype=np.int8)  # 0 diag, 1 up (u-1), 2 left (t-1)
     for u in range(1, nu + 1):
         lo, hi = max(1, u - band), min(nt, u + band)
@@ -102,6 +111,8 @@ def banded_dtw(U: np.ndarray, T: np.ndarray, band: int, penalty: float) -> tuple
     path = []
     while u > 0 and t > 0:
         path.append((u - 1, t - 1))
+        if open_begin and u == 1:
+            break
         m = move[u - 1, t - 1]
         if m == 0:
             u, t = u - 1, t - 1
@@ -134,7 +145,7 @@ def estimate_warp(user_content: np.ndarray, target_content: np.ndarray, grid: Fr
     band = max(2, int(round(cfg.band_seconds * grid.rate)))
     if abs(nu - len(target_content)) > band:
         return Result.failure(f"length difference exceeds the alignment band ({band} frames); remove latency first")
-    path, cost = banded_dtw(np.asarray(user_content), np.asarray(target_content), band, cfg.off_diagonal_penalty)
+    path, cost = banded_dtw(np.asarray(user_content), np.asarray(target_content), band, cfg.off_diagonal_penalty, cfg.open_begin)
     tau_raw = np.zeros(nu)
     lc = np.zeros(nu)
     cnt = np.zeros(nu)

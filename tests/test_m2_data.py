@@ -1,10 +1,9 @@
 import json
-import warnings
 
 import numpy as np
 import pytest
 
-from gyeol.core import FrameGrid, LicenseError, Profile, Purpose, Status
+from gyeol.core import FrameGrid, Status
 from gyeol.data import (
     AIHubFieldMap,
     PairedLoader,
@@ -23,7 +22,7 @@ from gyeol.dsp.weak_labels import WeakLabelConfig, robust_formants
 from gyeol.frontend import effective_bandwidth, estimate_t60
 from gyeol.io import save_audio
 from gyeol.pitch.consensus import consensus
-from gyeol.store import ConsentStore
+from gyeol_service.store import ConsentStore, Purpose
 from gyeol.synth import SynthNote, melody, sung_vowel
 
 from .helpers import SR, dsp_trackers
@@ -49,13 +48,11 @@ def test_vocalset_adapter(tmp_path):
     belt = next(i for i in items.values() if "belt" in i.path)
     assert belt.singer == "female1" and belt.labels["phonation"] == "pressed_belt" and belt.labels["vowel"] == "a"
     assert next(i for i in items.values() if "vibrato" in i.path).labels["vibrato"] is True
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        assert len(open_manifest(rep.manifest, Profile.COMMERCIAL)) == 3
+    assert len(open_manifest(rep.manifest)) == 3
     assert scan_vocalset(tmp_path / "missing").status is Status.FAILED
 
 
-def test_aihub_adapter_prints_conditions_and_uses_explicit_map(tmp_path, capsys):
+def test_aihub_adapter_uses_explicit_map(tmp_path):
     root = tmp_path / "aihub"
     _wav(root / "원천데이터/s01/song1.wav")
     _wav(root / "원천데이터/s02/song2.wav")
@@ -65,20 +62,15 @@ def test_aihub_adapter_prints_conditions_and_uses_explicit_map(tmp_path, capsys)
     fm = AIHubFieldMap(singer="meta.singer_id", gender="meta.gender", genre=None, lyrics=None,
                        attributes={"vibrato": "tech.vibrato", "kkeokki": "tech.bending"})
     rep = scan_aihub(root, "aihub_465_multi_singer", fm).unwrap()
-    err = capsys.readouterr().err
-    assert "never be redistributed" in err and "domestically" in err
     assert len(rep.manifest.items) == 1 and rep.manifest.items[0].labels == {"vibrato": True, "kkeokki": 2}
     assert rep.skipped[0][1].startswith("no label JSON")
     # the default map is a placeholder: files it cannot map are reported, not guessed
     rep2 = scan_aihub(root, "aihub_465_multi_singer").unwrap()
     assert not rep2.manifest.items and "check AIHubFieldMap" in rep2.skipped[0][1]
     assert "meta.singer_id" in inspect_json_keys(root)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        open_manifest(rep.manifest, Profile.COMMERCIAL)  # allowed under conditions
 
 
-def test_gtsinger_adapter_is_research_only_and_pairs(tmp_path):
+def test_gtsinger_adapter_pairs(tmp_path):
     root = tmp_path / "GTSinger/Korean"
     for grp, f in (("Control_Group", 220), ("Breathy_Group", 220)):
         _wav(root / f"KO-Tenor-1/Breathy/song_a/{grp}/0001.wav", f0=f)
@@ -86,11 +78,9 @@ def test_gtsinger_adapter_is_research_only_and_pairs(tmp_path):
     rep = scan_gtsinger(root).unwrap()
     ps = pairs(rep.manifest)
     assert len(ps) == 1 and ps[0][0].meta["pair_role"] == "off" and ps[0][1].labels["phonation"] == "breathy"
-    with pytest.raises(LicenseError):
-        open_manifest(rep.manifest, Profile.COMMERCIAL)
 
 
-def test_own_recordings_require_training_consent(tmp_path):
+def test_own_recordings_with_an_application_filter(tmp_path):
     cs = ConsentStore(tmp_path / "store")
     cs.grant("u1", {Purpose.ANALYSIS, Purpose.TRAINING})
     cs.grant("u2", {Purpose.ANALYSIS})
@@ -99,7 +89,7 @@ def test_own_recordings_require_training_consent(tmp_path):
         {"path": "b.wav", "user_id": "u2", "labels": {}},
         {"path": "c.wav", "labels": {}},
     ]))
-    r = scan_own(tmp_path, cs.allows)
+    r = scan_own(tmp_path, lambda uid: cs.allows(uid, Purpose.TRAINING))  # e.g. the app's training consent
     assert [i.singer for i in r.value.manifest.items] == ["u1"] and len(r.value.skipped) == 2
     assert r.value.manifest.items[0].meta["pair_id"] == "p1"
 
@@ -208,9 +198,7 @@ def test_paired_loader_aligns_on_to_off(tmp_path):
         p = root / f"KO-Alto-1/Breathy/song_b/{grp}/0001.wav"
         p.parent.mkdir(parents=True, exist_ok=True)
         save_audio(p, m.audio, SR)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        ds = open_manifest(scan_gtsinger(root).unwrap().manifest, Profile.RESEARCH)
+    ds = open_manifest(scan_gtsinger(root).unwrap().manifest)
     from gyeol.attributes.extract import analyze
 
     loader = PairedLoader(ds, analyzer=lambda rec: analyze(rec, trackers=dsp_trackers()))

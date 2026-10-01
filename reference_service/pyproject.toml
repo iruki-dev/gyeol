@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gyeol-reference-service"
+version = "2.0.0.dev0"
+description = "Reference service layer for gyeol: consent store, coaching sessions, per-user health accumulation"
+requires-python = ">=3.10"
+dependencies = ["gyeol"]
+
+[tool.setuptools]
+packages = ["gyeol_service"]
+
+[tool.setuptools.package-data]
+gyeol_service = ["resources/**/*.json"]

@@ -80,6 +80,12 @@ def train_heads(train: list[FrameExample], calib: list[FrameExample], tasks: dic
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+    return calibrate_heads(model, train, calib, tasks, cfg.ood_quantile, feature_name)
+
+
+def calibrate_heads(model: FrameHeads, train: list[FrameExample], calib: list[FrameExample], tasks: dict[str, TaskSpec],
+                    ood_quantile: float = 0.99, feature_name: str = "dsp") -> CalibratedHeads:
+    """Temperatures / variance scales on held-out (calibration) singers and the OOD detectors."""
     heads = CalibratedHeads(model, feature_name=feature_name)
     # temperatures on held-out (calibration) singers
     model.eval()
@@ -128,9 +134,9 @@ def train_heads(train: list[FrameExample], calib: list[FrameExample], tasks: dic
             tr_emb.append(e[0].numpy()[keep])
             tr_lab.append(lab[keep])
         cal_emb = np.concatenate([o[1][0].numpy() for o in outs])
-    heads.ood = MahalanobisOOD().fit(np.concatenate(tr_emb), np.concatenate(tr_lab)).calibrate(cal_emb, cfg.ood_quantile)
+    heads.ood = MahalanobisOOD().fit(np.concatenate(tr_emb), np.concatenate(tr_lab)).calibrate(cal_emb, ood_quantile)
     # input-space detector: the trunk's LayerNorm hides input scale from the embedding
     tr_in = np.concatenate([ex.features for ex in train])
     cal_in = np.concatenate([ex.features for ex in calib])
-    heads.input_ood = MahalanobisOOD().fit(tr_in, np.zeros(len(tr_in), int), shrinkage=1e-2).calibrate(cal_in, cfg.ood_quantile)
+    heads.input_ood = MahalanobisOOD().fit(tr_in, np.zeros(len(tr_in), int), shrinkage=1e-2).calibrate(cal_in, ood_quantile)
     return heads

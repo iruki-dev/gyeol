@@ -23,9 +23,8 @@ Two things deliberately stay outside the graphs:
 
 Every export is checked against PyTorch with ONNX Runtime (:func:`verify`),
 including a second input length to prove the time axis is really dynamic.
-Checkpoints go through the license gate *before* export
-(:func:`gyeol.train.checkpoint.load_checkpoint`); the exported file gets a
-JSON sidecar with the checkpoint's license lineage.
+The exported file gets a JSON sidecar with the checkpoint's provenance
+(:func:`gyeol.train.checkpoint.load_checkpoint`: the datasets and weights it was built from).
 """
 
 from __future__ import annotations
@@ -157,7 +156,7 @@ def export_component(name: str, module: nn.Module, args: tuple, other_args: tupl
     res = ExportResult(name, path, d1, d2, bool(d1 <= tolerance and d2 <= tolerance), tolerance)
     meta = {"component": name, "opset": OPSET, "inputs": spec.inputs, "outputs": spec.outputs,
             "verification": {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(res).items()},
-            "provenance": provenance or {"license": "untrained / no checkpoint"}}
+            "provenance": provenance or {"sources": [], "note": "untrained / no checkpoint"}}
     path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return res
 

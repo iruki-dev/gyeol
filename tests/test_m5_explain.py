@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from gyeol.core import AttributeCurve, ExplanationItem, Provenance, Span
+from gyeol.core import AttributeCurve, ExplanationItem, Span
 from gyeol.explain import explain
 from gyeol.explain.render_text import explanation_notes, item_text, load_strings
 
@@ -17,12 +17,12 @@ def _items(exp):
 @pytest.fixture(scope="module")
 def base():
     tgt = make_melody()
-    return tgt, rep_of(tgt.audio, Provenance.REFERENCE).unwrap()
+    return tgt, rep_of(tgt.audio).unwrap()
 
 
 def _pair(tgt_audio, usr_audio):
     t, u = pad_to(tgt_audio, usr_audio)
-    return rep_of(t, Provenance.REFERENCE).unwrap(), rep_of(u, Provenance.USER).unwrap()
+    return rep_of(t).unwrap(), rep_of(u).unwrap()
 
 
 def test_breathiness_and_loudness_items(base):

@@ -1,0 +1,18 @@
+# CPU smoke preset (see heads.yaml): tiny RMVPE.  Ground truth is exact f0 from harmonic-plus-noise resynthesised copies
+# (prepare.resynthesize); DSP consensus is only a weak label on high-confidence frames of the original items.
+task: pitch
+seed: 0
+device: auto
+threads: 2
+data:
+  cache: runs/cpu-smoke/cache
+  synthetic: {n_singers: 6, seconds: 1.2}
+  prepare: {sr: 22050, hop: 256, separation: "off", features: [dsp], resynthesize: [hnm]}
+  split: {train: 0.6, val: 0.2, test: 0.2}
+  crop_frames: [32, 48]
+  batch_size: 2
+optim: {lr: 1.0e-3, grad_accum: 2, grad_clip: 1.0, schedule: constant}
+run: {out: runs/cpu-smoke/pitch, max_steps: 10, val_every: 5, save_every: 5, log_every: 5, patience: 4, val_batches: 2}
+model: {size: tiny, exact_weight: 1.0, weak_weight: 0.3, weak_min_confidence: 0.8}
+components: {pitch: scratch}
+checkpointing: [pitch]

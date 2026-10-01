@@ -32,7 +32,7 @@ class PitchTrack:
 class PitchTracker(Protocol):
     """Anything that turns mono audio into a :class:`PitchTrack`.
 
-    ``asset`` names the tracker's entry in the license registry (``None`` for
+    ``asset`` names the tracker's weights in :mod:`gyeol.core.assets` (``None`` for
     gyeol's own DSP trackers).  Implementations must return a failed /
     unavailable :class:`Result` instead of raising on bad input.
     """

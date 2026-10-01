@@ -1,0 +1,25 @@
+# Long unattended CPU run: RMVPE (measured ~9 s/step on 4 CPU threads → 60k steps ≈ 6 days), fine-tuned from the
+# pretrained reference weights (`gyeol fetch rmvpe`, Apache-2.0).
+# Ground truth: exact f0 of resynthesised copies (MDB-stem-synth-style harmonic-plus-noise resynthesis, plus copies from
+# a gyeol-trained vocoder if you add `vocoder` and resynth_vocoder); DSP consensus is a weak label on confident frames only.
+# Evaluation: human-annotated real singing (Vocadito, MIR-1K manifests from gyeol.data.pitch_sets)
+# (their listed licenses are in the README).
+task: pitch
+seed: 0
+device: auto
+threads: 0
+data:
+  cache: runs/cpu-full/cache
+  manifests: []
+  prepare: {sr: 44100, hop: 512, separation: auto, features: [dsp], resynthesize: [hnm]}
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  crop_frames: [96, 192]
+  batch_size: 8
+  num_workers: 2
+optim: {lr: 2.0e-4, grad_accum: 2, grad_clip: 1.0, schedule: cosine, warmup_steps: 1000, betas: [0.9, 0.99]}
+run: {out: runs/cpu-full/pitch, max_steps: 60000, val_every: 2000, save_every: 500, log_every: 50, patience: 10, val_batches: 50}
+model: {size: full, target_sigma_cents: 25, exact_weight: 1.0, weak_weight: 0.3, weak_min_confidence: 0.8,
+        eval_sets: []}   # e.g. [data/manifests/vocadito.json]
+components: {pitch: finetune}
+init: {pitch: {path: ~/.cache/gyeol/rmvpe/rmvpe.pt, asset: rmvpe}}
+checkpointing: [pitch]

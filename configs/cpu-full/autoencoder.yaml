@@ -1,0 +1,23 @@
+# Long unattended CPU run: the full autoencoder (encoders, acoustic model, NSF vocoder, discriminators).
+# Measured on 4 CPU threads: ~17–31 s for a vocoded step, ~3 s otherwise → ~8 s/step with vocode_every 4 → 75k steps ≈ 1 week.
+# Interrupt with Ctrl-C at any time and continue with --resume.
+task: autoencoder
+seed: 0
+device: auto
+threads: 0
+data:
+  cache: runs/cpu-full/cache
+  manifests: []
+  prepare: {sr: 44100, hop: 512, separation: auto, features: [dsp]}
+  split: {train: 0.8, val: 0.1, test: 0.1}
+  crop_frames: [64, 128]
+  batch_size: 8
+  num_workers: 2
+optim: {lr: 2.0e-4, grad_accum: 4, grad_clip: 1.0, schedule: exponential, gamma: 0.99999, betas: [0.8, 0.99]}
+run: {out: runs/cpu-full/autoencoder, max_steps: 75000, val_every: 2000, save_every: 500, log_every: 50, patience: 20,
+      sample_every: 5000, n_samples: 3, val_batches: 50}
+model: {size: full, vocode_every: 4, adversarial: true, timbre_shift: true, disc_channels: 16}
+components: {singer_encoder: scratch, env_encoder: scratch, residual_encoder: scratch, acoustic: scratch, vocoder: scratch,
+             discriminators: scratch}
+# init: {vocoder: {path: runs/cpu-full/vocoder/best.pt, prefix: "vocoder."}}   # start from a separately trained vocoder
+checkpointing: [acoustic, vocoder]

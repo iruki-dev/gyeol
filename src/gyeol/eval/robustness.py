@@ -28,7 +28,6 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-from ..core.consent import Provenance
 from ..core.containers import Recording, Representation
 from ..core.status import Result
 from ..verification import degrade
@@ -146,7 +145,7 @@ def run_robustness(items: Sequence[GridItem], conditions: Sequence[GridCondition
                 off = refine_offset(y, ref, it.sr, max_lag_s=0.5)
                 if off.usable:
                     y = shift(y, off.value.latency_s, it.sr)
-            r = analyzer(Recording(y, it.sr, Provenance.SYNTHETIC))
+            r = analyzer(Recording(y, it.sr))
             if not r.usable:
                 failures.append(f"{it.item_id} @ {c.key}: {r.reason}")
                 continue

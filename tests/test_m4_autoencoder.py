@@ -3,7 +3,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from gyeol.core import FrameGrid, Provenance, Recording, Status
+from gyeol.core import FrameGrid, Recording, Status
 from gyeol.decoder import AutoencoderConfig, BigVGANAdapter, GyeolAutoencoder, HarmonicSource, NSFVocoder
 from gyeol.encoders.latent import LeakageHeads, ResidualEncoder, SingerEncoder, grad_reverse, singer_vector, supervised_contrastive
 from gyeol.encoders.mel import LogMel
@@ -173,9 +173,9 @@ def test_singer_encoder_contrastive_and_provenance():
     same = sim[ids[:, None] == ids[None, :]].mean()
     diff = sim[ids[:, None] != ids[None, :]].mean()
     assert same > diff + 0.3
-    rec = Recording(np.zeros(100), SR, Provenance.REFERENCE)
+    rec = Recording(np.zeros(100), SR)
     sv = singer_vector(enc, mel[0].numpy(), rec)
-    assert sv.provenance is Provenance.REFERENCE and sv.source_recording_id == rec.recording_id
+    assert sv.source_recording_id == rec.recording_id
 
 
 def test_frame_weights_emphasise_consonants_and_quiet_frames():
@@ -204,7 +204,7 @@ def test_vocoder_benchmark_and_reencoding_consistency():
     assert all(r.lsd_voiced_db < 1e-3 and r.f0_rmse_cents < 1e-6 and r.voicing_error == 0 for r in ident.values())
     detuned = vocoder_benchmark(lambda x, sr: np.interp(np.arange(len(x)) * 1.03, np.arange(len(x)), x), items, analyzer=an)
     assert all(r.f0_rmse_cents > 30 for r in detuned.values())
-    a = an(Recording(items[0].audio, SR, Provenance.SYNTHETIC)).unwrap()
+    a = an(Recording(items[0].audio, SR)).unwrap()
     assert all(v == 0 for v in reencoding_consistency(a, a).values() if np.isfinite(v))
 
 

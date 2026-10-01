@@ -20,6 +20,13 @@ def load_strings(lang: str = "ko") -> dict:
 
 
 def _where(it: ExplanationItem, strings: dict) -> str:
+    if it.detail.get("location") == "transition":
+        syl = next((sp.syllables for sp in it.spans if sp.syllables), ())
+        if len(syl) >= 2:
+            return strings["where"]["transition"].format(a=f"'{syl[0]}'", b=f"'{syl[-1]}'")
+        a, b = it.detail.get("between_notes", [0, 1])
+        return strings["where"]["transition"].format(a=strings["where"]["note_unknown"].format(index=a + 1),
+                                                     b=strings["where"]["note_unknown"].format(index=b + 1))
     note = it.detail.get("target_note", -1)
     if note is None or note < 0:
         return strings["where"]["phrase"]
@@ -72,7 +79,11 @@ def item_text(it: ExplanationItem, lang: str = "ko") -> str:
     names = s.get("labels", {})
     extra = {"label": names.get(label, label or ""), "target": names.get(str(it.detail.get("target", "")), it.detail.get("target", "")),
              "user": names.get(str(it.detail.get("user", "")), it.detail.get("user", ""))}
-    return tmpl[key].format(where=where, value=value, unit=it.unit, **particles(where), **extra)
+    text = tmpl[key].format(where=where, value=value, unit=it.unit, **particles(where), **extra)
+    ev = it.detail.get("event") if it.attribute in ("contour_deviation", "transition_deviation") else None
+    if ev and ev in s.get("event_span", {}):
+        text += s["event_span"]["suffix"].format(event=s["event_span"][ev])
+    return text
 
 
 def explanation_notes(exp: Explanation, lang: str = "ko") -> list[str]:
@@ -80,12 +91,19 @@ def explanation_notes(exp: Explanation, lang: str = "ko") -> list[str]:
     s = load_strings(lang)
     out = []
     tr = exp.transposition_cents
-    if tr <= -1200:
+    if tr is None:
+        out.append(s["premise"]["octave_invariant"])
+    elif tr <= -1200:
         out.append(s["transposition"]["octave_down"])
     elif tr >= 1200:
         out.append(s["transposition"]["octave_up"])
     elif tr != 0:
         out.append(s["transposition"]["semitones"].format(value=round(tr / 100)))
+    if exp.comparison_mode.get("timing") == "content_aligned":
+        out.append(s["premise"]["content_aligned"])
+    for name in sorted({w.premise for w in exp.withheld}):
+        if name in s["premise"]["withheld"] and not (name == "shared_clock" and exp.comparison_mode.get("timing") == "content_aligned"):
+            out.append(s["premise"]["withheld"][name])
     for flag in (exp.meta.get("user_quality") or {}).get("flags", {}):
         out.append(s["quality_flag"].get(flag, flag))
     for sp in exp.cannot_judge:

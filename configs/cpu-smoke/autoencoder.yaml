@@ -1,0 +1,17 @@
+# CPU smoke preset (see heads.yaml): tiny autoencoder, vocoded + adversarial every 4th step.
+task: autoencoder
+seed: 0
+device: auto
+threads: 2
+data:
+  cache: runs/cpu-smoke/cache
+  synthetic: {n_singers: 6, seconds: 1.2}
+  prepare: {sr: 22050, hop: 256, separation: "off", features: [dsp]}
+  split: {train: 0.6, val: 0.2, test: 0.2}
+  crop_frames: [24, 40]
+  batch_size: 4
+optim: {lr: 2.0e-3, grad_accum: 2, grad_clip: 1.0, schedule: constant}
+run: {out: runs/cpu-smoke/autoencoder, max_steps: 16, val_every: 8, save_every: 8, log_every: 4, patience: 4, n_samples: 1, val_batches: 2}
+model: {size: tiny, vocode_every: 4, adversarial: true, timbre_shift: true, disc_channels: 4, periods: [2, 3], scales: 2}
+components: {singer_encoder: scratch, env_encoder: scratch, residual_encoder: scratch, acoustic: scratch, vocoder: scratch, discriminators: scratch}
+checkpointing: [acoustic]

@@ -1,4 +1,9 @@
-"""Consent-aware storage for voice-derived data.
+"""Consent-aware storage for voice-derived data (reference service layer, revision C1).
+
+User state — consent records, stored features, raw audio and their deletion —
+lives here, outside the ``gyeol`` library, which has no consent mechanism of
+its own: what users must agree to, and when, is the application's policy.
+This module is one example of keeping that state.
 
 Singer vectors, embeddings and attribute features derived from a voice are
 treated as sensitive biometric information (PIPA).  This module provides
@@ -23,13 +28,36 @@ import os
 import re
 import shutil
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
 import numpy as np
 
-from ..core.consent import ConsentError, ConsentToken, Purpose
+class ConsentError(PermissionError):
+    pass
+
+
+class Purpose(str, Enum):
+    ANALYSIS = "analysis"
+    TRAINING = "training"
+    STORAGE = "storage"
+    VOICE_SYNTHESIS = "voice_synthesis"
+
+
+@dataclass(frozen=True)
+class ConsentToken:
+    """What a user has agreed to, as issued by :meth:`ConsentStore.grant`."""
+
+    user_id: str
+    purposes: frozenset[Purpose]
+    token_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    issued_at: float = field(default_factory=time.time)
+    revoked: bool = False
+
+    def allows(self, purpose: Purpose) -> bool:
+        return not self.revoked and Purpose(purpose) in self.purposes
 
 _USER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 

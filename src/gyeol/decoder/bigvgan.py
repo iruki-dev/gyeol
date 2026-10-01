@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 
 
@@ -18,8 +17,7 @@ class BigVGANAdapter:
     name = "bigvgan_v2"
     f0_control = False
 
-    def __init__(self, checkpoint_dir: str, profile: Profile = Profile.COMMERCIAL, device: str = "cpu"):
-        require_allowed(lookup("bigvgan_v2"), profile, announce=False)
+    def __init__(self, checkpoint_dir: str, device: str = "cpu"):
         self.checkpoint_dir, self.device = checkpoint_dir, device
         self._model = None
 

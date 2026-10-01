@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from gyeol.attributes.extract import analyze
-from gyeol.core import Provenance, Recording
+from gyeol.core import Recording
 from gyeol.pitch.adapters import PyinTracker, SHSTracker, YinTracker
 from gyeol.synth import SynthNote, melody
 
@@ -27,10 +27,8 @@ def make_melody(detune=(0,) * 6, shifts=(0,) * 6, vib=(0,) * 6, scoop=(0,) * 6, 
     return melody(notes, sr=SR, transpose_cents=transpose, seed=seed, **kw)
 
 
-def rep_of(audio, provenance=Provenance.SYNTHETIC, owner=None, sr=SR, **kw):
-    if provenance is Provenance.USER and owner is None:
-        owner = "tester"
-    return analyze(Recording(np.asarray(audio, float), sr, provenance, owner_id=owner), trackers=dsp_trackers(), **kw)
+def rep_of(audio, sr=SR, **kw):
+    return analyze(Recording(np.asarray(audio, float), sr), trackers=dsp_trackers(), **kw)
 
 
 def pad_to(*arrays):

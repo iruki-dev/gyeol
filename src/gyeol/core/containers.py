@@ -9,21 +9,29 @@ from typing import Any, Iterator, Mapping
 
 import numpy as np
 
-from .consent import Provenance, SingerVector
 from .grid import FrameGrid, GridMismatchError
-from .license import LicensedAsset
+
+
+@dataclass(frozen=True, eq=False)
+class SingerVector:
+    """Utterance-level singer embedding and the recording it was derived from."""
+
+    vector: np.ndarray
+    source_recording_id: str
+
+    def __post_init__(self) -> None:
+        v = np.asarray(self.vector, dtype=np.float32)
+        v.setflags(write=False)
+        object.__setattr__(self, "vector", v)
 
 
 @dataclass
 class Recording:
-    """Mono audio plus who it belongs to and under which license."""
+    """Mono audio with an id (and free-form metadata)."""
 
     audio: np.ndarray
     sr: int
-    provenance: Provenance = Provenance.UNKNOWN
-    owner_id: str | None = None
     recording_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    license: LicensedAsset | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -31,8 +39,6 @@ class Recording:
         if a.ndim != 1:
             raise ValueError(f"Recording expects mono audio, got shape {a.shape}")
         self.audio = a
-        if self.provenance is Provenance.USER and not self.owner_id:
-            raise ValueError("a USER recording needs owner_id")
 
     @property
     def duration(self) -> float:
@@ -117,7 +123,6 @@ class Representation:
     grid: FrameGrid
     curves: AttributeCurves
     recording_id: str
-    provenance: Provenance
     events: list[Event] = field(default_factory=list)
     singer: SingerVector | None = None  # M4
     env: np.ndarray | None = None  # M4
@@ -129,8 +134,6 @@ class Representation:
         self.grid.require_same(self.curves.grid)
         if self.residual is not None:
             self.grid.check_array(self.residual, "residual")
-        if self.singer is not None and self.singer.provenance is not self.provenance:
-            raise ValueError("singer vector provenance must match the representation's provenance")
 
 
 class Consistency(str, Enum):
@@ -171,14 +174,50 @@ class ExplanationItem:
 
 
 @dataclass
+class Premise:
+    """A condition a judgement depends on, checked before the judgement is made.
+
+    ``passed`` is None when the premise could not be checked (that counts as
+    not established).  ``measures`` holds the numbers the check used.
+    """
+
+    name: str  # e.g. "shared_clock", "octave_relation"
+    statement: str  # what must be true, in plain English
+    passed: bool | None
+    reason: str = ""
+    measures: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def holds(self) -> bool:
+        return self.passed is True
+
+
+@dataclass
+class WithheldItem:
+    """A judgement that was not made because a premise failed."""
+
+    category: str
+    attribute: str
+    target_note: int
+    premise: str
+    reason: str
+
+
+@dataclass
 class Explanation:
     grid: FrameGrid  # user grid
     warp: np.ndarray  # τ(t): target frame (float) for each user frame
-    transposition_cents: float
+    #: octave / key relation user − target; None when it could not be established (comparison is then octave-invariant)
+    transposition_cents: float | None
     items: list[ExplanationItem]
     cannot_judge: list[Span]
     n_takes: int
     meta: dict[str, Any] = field(default_factory=dict)
+    premises: dict[str, Premise] = field(default_factory=dict)
+    withheld: list[WithheldItem] = field(default_factory=list)
+    #: how each aspect was compared, e.g. {"timing": "shared_clock" | "content_aligned",
+    #: "pitch": "absolute" | "octave_invariant"}
+    comparison_mode: dict[str, str] = field(default_factory=dict)
 
     def by_category(self, category: str) -> list[ExplanationItem]:
         return [i for i in self.items if i.category == category]

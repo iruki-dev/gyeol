@@ -1,0 +1,16 @@
+# CPU smoke preset (see heads.yaml): tiny NSF vocoder on band aperiodicity + mel + f0.
+task: vocoder
+seed: 0
+device: auto
+threads: 2
+data:
+  cache: runs/cpu-smoke/cache
+  synthetic: {n_singers: 6, seconds: 1.2}
+  prepare: {sr: 22050, hop: 256, separation: "off", features: [dsp]}
+  split: {train: 0.6, val: 0.2, test: 0.2}
+  crop_frames: [16, 32]
+  batch_size: 2
+optim: {lr: 2.0e-3, grad_accum: 1, grad_clip: 1.0, schedule: constant}
+run: {out: runs/cpu-smoke/vocoder, max_steps: 12, val_every: 6, save_every: 6, log_every: 3, patience: 4, n_samples: 1, val_batches: 2}
+model: {size: tiny, channels: 16, adversarial: true, disc_channels: 4, periods: [2, 3], scales: 2}
+components: {vocoder: scratch, discriminators: scratch}

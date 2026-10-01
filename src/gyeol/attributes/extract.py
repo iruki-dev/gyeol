@@ -27,9 +27,18 @@ import numpy as np
 from ..align.content import ContentFeatures, MFCCContent
 from ..core.containers import AttributeCurve, AttributeCurves, Recording, Representation
 from ..core.grid import DEFAULT_HOP, FrameGrid
-from ..core.license import Profile
 from ..core.status import Result
 from ..frontend.quality import QualityPolicy, assess
+from ..frontend.separation import (
+    AccompanimentPolicy,
+    SeparationPolicy,
+    TakePolicy,
+    default_separator,
+    make_separator,
+    unseparated_factor,
+    estimate_accompaniment,
+    separation_quality,
+)
 from ..pitch.adapters import default_trackers
 from ..pitch.base import PitchTracker
 from ..pitch.consensus import ConsensusConfig, consensus
@@ -40,31 +49,126 @@ from .signal import harmonic_noise, loudness, relative_loudness
 @dataclass
 class AnalysisConfig:
     hop: int = DEFAULT_HOP
-    profile: Profile = Profile.COMMERCIAL
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     quality: QualityPolicy = field(default_factory=QualityPolicy)
     events: EventConfig = field(default_factory=EventConfig)
     #: optional learned heads (M3) and the frame encoder that feeds them
     heads: object | None = None  # CalibratedHeads
     feature_encoder: object | None = None  # FrameEncoder or DSPFrameFeatures
+    #: revision A1: accompaniment detection and separation-quality policies
+    accompaniment: AccompanimentPolicy = field(default_factory=AccompanimentPolicy)
+    separation_policy: SeparationPolicy = field(default_factory=SeparationPolicy)
+    #: keep the separated vocal in ``rep.meta["separated_audio"]`` (data preparation caches it)
+    keep_separated_audio: bool = False
+    #: revision D1: user takes with a known accompaniment are separated only when bleed is detected
+    take: TakePolicy = field(default_factory=TakePolicy)
+
+
+SEPARATION_MODES = ("auto", "always", "off")
+
+
+def _separate(recording: Recording, mode: str, separator, backing, cfg: AnalysisConfig,
+              accompaniment_ref: np.ndarray | None = None) -> Result[tuple[np.ndarray, dict, list[str]]]:
+    """Decide on separation and run it → (signal to analyse, report, warnings)."""
+    from ..frontend.quality import detect_bleed
+
+    x, sr = recording.audio, recording.sr
+    report: dict = {"mode": mode, "applied": False}
+    warnings: list[str] = []
+    if mode == "off":
+        report["reason"] = "separation disabled"
+        return Result.success((x, report, warnings))
+    need = mode == "always" or backing is not None
+    if mode == "auto" and accompaniment_ref is not None and backing is None:
+        # a headphone take of a known song: separate only when the accompaniment bleeds into the microphone
+        b = detect_bleed(x, accompaniment_ref, sr)
+        if b.usable:
+            bleed, prom = b.value.bleed_db, b.value.lag_prominence
+            found = bool(np.isfinite(bleed) and bleed >= cfg.take.bleed_threshold_db and prom >= cfg.take.min_lag_prominence)
+            report["bleed"] = {"bleed_db": bleed, "lag_prominence": prom, "lag_s": b.value.lag_s, "threshold_db": cfg.take.bleed_threshold_db,
+                               "detected": found}
+            report["accompaniment"] = {"may_contain": found, "residual_db": bleed, "reasons": [f"bleed {bleed:.1f} dB"] if found else []}
+            need = need or found
+        else:
+            report["bleed"] = {"detected": None, "reason": b.reason}
+            report["accompaniment"] = {"may_contain": None, "reasons": [f"undetermined: {b.reason}"]}
+        if not need:
+            report["reason"] = "no accompaniment bleed detected"
+            return Result.success((x, report, warnings))
+        if separator is None or isinstance(separator, str):
+            separator_r = make_separator(separator or cfg.take.separator, accompaniment=accompaniment_ref, accompaniment_sr=sr)
+            if not separator_r.ok:
+                report["reason"] = f"bleed detected but no separator available: {separator_r.reason}"
+                warnings.append("accompaniment bleed detected and not separated: confidences reduced")
+                return Result.success((x, report, warnings))
+            separator = separator_r.value
+    elif mode == "auto":
+        acc = estimate_accompaniment(x, sr, cfg.accompaniment)
+        if acc.usable:
+            a = acc.value
+            report["accompaniment"] = {"may_contain": a.may_contain, "residual_db": a.residual_db, "residual_flatness": a.residual_flatness,
+                                       "tonal_gaps": a.tonal_gaps, "low_freq_fraction": a.low_freq_fraction, "reasons": a.reasons}
+            need = need or a.may_contain
+        else:  # cannot tell (e.g. a very short clip): separate if a separator exists, but do not penalise
+            report["accompaniment"] = {"may_contain": None, "reasons": [f"undetermined: {acc.reason}"]}
+            need = True
+    if not need:
+        report["reason"] = "no accompaniment detected"
+        return Result.success((x, report, warnings))
+    if isinstance(separator, str):
+        sep = make_separator(separator, accompaniment=backing, accompaniment_sr=sr)
+    else:
+        sep = Result.success(separator) if separator is not None else default_separator(backing, sr)
+    if not sep.ok:
+        if mode == "always":
+            return Result.failure(f"separation required but unavailable: {sep.reason}")
+        report["reason"] = f"accompaniment suspected but no separator available: {sep.reason}"
+        warnings.append("accompaniment suspected and not separated: confidences reduced")
+        return Result.success((x, report, warnings))
+    out = sep.value.separate(x, sr)
+    if not out.ok:
+        if mode == "always":
+            return Result.failure(f"separation failed: {out.reason}")
+        report["reason"] = f"separator failed: {out.reason}"
+        warnings.append("accompaniment suspected and separation failed: confidences reduced")
+        return Result.success((x, report, warnings))
+    report.update(applied=True, separator=getattr(sep.value, "name", type(sep.value).__name__))
+    return Result.success((np.asarray(out.value, float), report, warnings))
 
 
 def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = None, content: ContentFeatures | None = None,
-            backing: np.ndarray | None = None, config: AnalysisConfig | None = None) -> Result[Representation]:
+            backing: np.ndarray | None = None, config: AnalysisConfig | None = None, separation: str = "auto",
+            separator=None, accompaniment_ref: np.ndarray | None = None) -> Result[Representation]:
     """Build the interpretable layer for one recording.
+
+    ``separation``: ``"auto"`` (default) separates the vocal first whenever the
+    input may contain accompaniment (:func:`~gyeol.frontend.separation.estimate_accompaniment`,
+    or a known ``backing`` track); ``"always"`` requires separation (fails if no
+    separator is available); ``"off"`` analyses the input as is.  ``separator``
+    is any object with ``separate(audio, sr) -> Result`` or a name from
+    :data:`~gyeol.frontend.separation.SEPARATORS`; by default the backing
+    canceller (when ``backing`` is given) or fetched BS-RoFormer weights.
+
+    ``accompaniment_ref`` (revision D1): the cached accompaniment of the target
+    song (:func:`~gyeol.frontend.separation.separate_target`), at this
+    recording's rate.  A user take recorded on headphones is then separated in
+    ``auto`` mode only when that accompaniment bleeds into the microphone
+    (``config.take.bleed_threshold_db``), with the light separator
+    ``config.take.separator`` (default: subtract the known accompaniment).
 
     Returns ``FAILED`` for unusable input (too short, no voiced frames) with
     the reason; quality problems that still allow analysis are reported in
     ``representation.quality`` and reflected in curve confidences.
     """
     cfg = config or AnalysisConfig()
-    x, sr = recording.audio, recording.sr
-    if len(x) < int(0.3 * sr):
+    if separation not in SEPARATION_MODES:
+        raise ValueError(f"separation must be one of {SEPARATION_MODES}, got {separation!r}")
+    raw, sr = recording.audio, recording.sr
+    if len(raw) < int(0.3 * sr):
         return Result.failure("recording shorter than 300 ms")
-    if not np.all(np.isfinite(x)) or np.max(np.abs(x)) == 0:
+    if not np.all(np.isfinite(raw)) or np.max(np.abs(raw)) == 0:
         return Result.failure("recording is silent or contains NaN/inf")
-    grid = FrameGrid.for_samples(len(x), sr, cfg.hop)
-    xc = x - np.mean(x)
+    grid = FrameGrid.for_samples(len(raw), sr, cfg.hop)
     timings: dict[str, float] = {}
     clock = [time.perf_counter()]
 
@@ -73,7 +177,25 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
         timings[stage] = now - clock[0]
         clock[0] = now
 
-    pr = consensus(xc, sr, grid, list(trackers) if trackers else default_trackers(cfg.profile), cfg.consensus)
+    sr_ = _separate(recording, separation, separator, backing, cfg, accompaniment_ref)
+    if not sr_.ok:
+        return Result.failure(sr_.reason)
+    x, sep_report, sep_warnings = sr_.value
+    sep_factor = np.ones(grid.n_frames)
+    if sep_report.get("applied"):
+        ref = backing if backing is not None else accompaniment_ref
+        sq = separation_quality(raw, x, sr, grid, backing=ref, separator=sep_report.get("separator", ""), policy=cfg.separation_policy)
+        sep_factor = sq.frame_factor
+        sep_report.update(residual_db=sq.residual_db, residual_reference=sq.residual_reference, flags=sq.flags,
+                          median_frame_sir_db=float(np.median(sq.frame_sir_db)))
+    elif sep_report.get("accompaniment", {}).get("may_contain") and separation != "off":
+        f = unseparated_factor(sep_report["accompaniment"].get("residual_db"), cfg.separation_policy)
+        sep_report["unseparated_factor"] = f
+        sep_factor = np.full(grid.n_frames, f)
+    lap("separation")
+    xc = x - np.mean(x)
+
+    pr = consensus(xc, sr, grid, list(trackers) if trackers else default_trackers(), cfg.consensus)
     if not pr.usable:
         return Result.failure(f"pitch analysis failed: {pr.reason}")
     p = pr.value
@@ -82,17 +204,22 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
         return Result.failure("no voiced frames: nothing sung was detected")
 
     lap("pitch")
-    q = assess(x, sr, grid, voiced, backing=backing, policy=cfg.quality)
+    q = assess(raw, sr, grid, voiced, backing=backing, policy=cfg.quality, analysis=x)
     lap("quality")
-    ff = q.frame_factor if q.frame_factor is not None else np.ones(grid.n_frames)
+    ff = (q.frame_factor if q.frame_factor is not None else np.ones(grid.n_frames)) * sep_factor
+    for k, v in sep_report.get("flags", {}).items():
+        q.flags[k] = v
+    if sep_report.get("accompaniment", {}).get("may_contain") and not sep_report.get("applied") and separation != "off":
+        q.flags["accompaniment_unseparated"] = sep_report.get("reason", "accompaniment suspected")
+    f0_conf = p.f0_conf * sep_factor
     clip_ok = 0.0 if "clipping" in q.flags else 1.0
 
     curves = AttributeCurves(grid)
     add = lambda name, v, c, unit, **kw: curves.add(AttributeCurve(name, v, c, grid, unit, **kw))  # noqa: E731
     cents = p.cents
-    add("f0_cents", cents, p.f0_conf, "cents re A4")
+    add("f0_cents", cents, f0_conf, "cents re A4")
     add("voicing", p.voiced_prob, np.ones(grid.n_frames), "probability")
-    add("subharmonic_ratio", p.subharmonic_ratio, p.f0_conf * ff, "ratio")
+    add("subharmonic_ratio", p.subharmonic_ratio, p.f0_conf * ff, "ratio")  # ff already carries the separation factor
 
     loud = loudness(xc, sr, grid)
     add("loudness", loud, ff * (loud > -90), "dBFS(A)")
@@ -108,8 +235,8 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
 
     notes = notes_from_pitch(cents, voiced, grid)
     center = pitch_center(cents, voiced, grid, segments=notes)
-    add("pitch_center", center, p.f0_conf, "cents re A4")
-    rate, extent, vconf = vibrato_curves(cents, center, voiced, grid, p.f0_conf)
+    add("pitch_center", center, f0_conf, "cents re A4")
+    rate, extent, vconf = vibrato_curves(cents, center, voiced, grid, f0_conf)
     add("vibrato_rate", rate, vconf, "Hz")
     add("vibrato_extent", extent, vconf, "cents")
 
@@ -118,17 +245,20 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     lap("content")
     add("content", feats, np.ones(grid.n_frames), "normalised", labels=tuple(f"c{i}" for i in range(feats.shape[1])))
 
-    events = detect_events(cents, center, voiced, p.f0_conf, vconf, notes, grid, cfg.events)
+    events = detect_events(cents, center, voiced, f0_conf, vconf, notes, grid, cfg.events)
     lap("events")
     rep = Representation(
-        grid=grid, curves=curves, recording_id=recording.recording_id, provenance=recording.provenance, events=events,
-        quality={"flags": dict(q.flags), "snr_db": None if q.snr is None else q.snr.snr_db,
+        grid=grid, curves=curves, recording_id=recording.recording_id, events=events,
+        quality={"flags": dict(q.flags), "separation": sep_report, "snr_db": None if q.snr is None else q.snr.snr_db,
                  "bandwidth_hz": None if q.bandwidth is None else q.bandwidth.bandwidth_hz,
                  "clipping_fraction": q.clipping.fraction, "bleed_db": None if q.bleed is None else q.bleed.bleed_db},
         meta={"notes": [(n.start, n.end) for n in notes], "trackers": [t.name for t in p.tracks],
               "failed_trackers": p.failed_trackers, "octave_repaired_fraction": float(p.octave_repaired[voiced].mean())},
     )
-    warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings
+    rep.meta["analysis_signal"] = "separated vocal" if sep_report.get("applied") else "input"
+    if cfg.keep_separated_audio and sep_report.get("applied"):
+        rep.meta["separated_audio"] = x
+    warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings + sep_warnings
     if cfg.heads is not None:
         lr = _learned_curves(rep, xc, sr, cfg, ff, voiced)
         if lr.ok:

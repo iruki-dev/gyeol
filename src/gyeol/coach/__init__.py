@@ -2,21 +2,26 @@
 
 * :mod:`~gyeol.coach.thresholds` — fitted operating thresholds (never hard-coded);
 * :mod:`~gyeol.coach.priority` — reliability × audibility ranking with a category tie order;
-* :mod:`~gyeol.coach.session` — feedback volume, fading schedule, self-assessment first, summaries;
 * :mod:`~gyeol.coach.practice` — practice suggestions from a coach-authored data file;
 * :mod:`~gyeol.coach.onboarding` — SSAP/SPB-style screen: production accuracy, precision, perception, routing;
-* :mod:`~gyeol.coach.health` — range/tessitura checks, beginner restrictions, phonation time, fatigue, referral notice.
+* :mod:`~gyeol.coach.health` — range/tessitura checks, beginner restrictions, phonation-time and fatigue measures.
+
+Revision C1: the library is stateless.  The coaching *session* (feedback
+fading schedule, attempt history, self-assessment flow, summaries) and the
+consent / storage / deletion store live in the reference service package,
+``reference_service/gyeol_service`` — one way to hold user state on top of
+these functions, not part of the library.
 """
 
 from .health import (
     AttemptMetrics,
-    FatigueMonitor,
-    PhonationLog,
     PhraseCheck,
     VoiceRange,
     attempt_metrics,
     check_phrase,
+    fatigue_flags,
     note_centres,
+    phonation_warnings,
     restricted_for_level,
     voiced_seconds,
 )
@@ -32,14 +37,11 @@ from .onboarding import (
 )
 from .practice import Exercise, PracticeMap
 from .priority import DEFAULT_TIERS, PriorityConfig, RankedItem, rank
-from .session import Attempt, CoachConfig, CoachSession, Feedback, FeedbackEntry, SelfAssessmentPrompt, SessionSummary
 from .thresholds import AttributeThreshold, ThresholdSet, fit_attribute_threshold
 
 __all__ = [
-    "Attempt", "AttemptMetrics", "AttributeThreshold", "CoachConfig", "CoachSession", "DEFAULT_TIERS", "DiscriminationTrial",
-    "Exercise", "FatigueMonitor", "Feedback", "FeedbackEntry", "IntervalTrial", "MelodyTrial", "OnboardingProfile",
-    "PhonationLog", "PhraseCheck", "PitchMatchTrial", "PracticeMap", "PriorityConfig", "RankedItem", "SelfAssessmentPrompt",
-    "SessionSummary", "ThresholdSet", "VoiceRange", "attempt_metrics", "check_phrase", "fit_attribute_threshold",
-    "fold_octave", "note_centres", "perception_threshold", "rank", "restricted_for_level", "score_onboarding",
-    "voiced_seconds",
+    "AttemptMetrics", "AttributeThreshold", "DEFAULT_TIERS", "DiscriminationTrial", "Exercise", "IntervalTrial", "MelodyTrial",
+    "OnboardingProfile", "PhraseCheck", "PitchMatchTrial", "PracticeMap", "PriorityConfig", "RankedItem", "ThresholdSet",
+    "VoiceRange", "attempt_metrics", "check_phrase", "fatigue_flags", "fit_attribute_threshold", "fold_octave", "note_centres",
+    "perception_threshold", "phonation_warnings", "rank", "restricted_for_level", "score_onboarding", "voiced_seconds",
 ]

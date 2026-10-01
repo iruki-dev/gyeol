@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from gyeol.core import FrameGrid, LicenseError, Profile, Provenance, Result, Status
+from gyeol.core import FrameGrid, Result, Status
 from gyeol.io import chirp, integrated_loudness, load_recording, loopback_latency, normalize_loudness, refine_offset, save_audio, tap_along_latency
 from gyeol.io.loudness import a_weighting_sos
 from gyeol.pitch.adapters import FCPETracker, PyinTracker, RMVPETracker, SHSTracker, SwiftF0Tracker, YinTracker
@@ -50,11 +50,11 @@ def test_latency_tools():
 def test_load_recording_reports_failures(tmp_path):
     bad = tmp_path / "x.wav"
     bad.write_bytes(b"not audio")
-    r = load_recording(bad, Provenance.USER, owner_id="u")
+    r = load_recording(bad)
     assert r.status is Status.FAILED and "cannot read" in r.reason
     ok = tmp_path / "ok.wav"
     save_audio(ok, np.zeros(1000) + 0.1, SR, metadata={"comment": "test"})
-    assert load_recording(ok, Provenance.USER, owner_id="u").ok
+    assert load_recording(ok).ok
 
 
 # --- pitch -------------------------------------------------------------------
@@ -104,11 +104,11 @@ def test_consensus_reports_tracker_failures():
     assert consensus(v.audio, SR, g, [_Broken()]).status is Status.FAILED
 
 
-def test_neural_adapters_are_optional_and_license_gated():
+def test_neural_adapters_are_optional():
     with pytest.raises(FileNotFoundError, match="gyeol fetch rmvpe"):  # reimplemented in M8; weights are never bundled
         RMVPETracker("weights.pt")
     for cls, pkg in ((SwiftF0Tracker, "swift_f0"), (FCPETracker, "torchfcpe")):
-        tr = cls(Profile.COMMERCIAL)
+        tr = cls()
         try:
             __import__(pkg)
         except ImportError:
@@ -117,15 +117,6 @@ def test_neural_adapters_are_optional_and_license_gated():
         v = sung_vowel(f0=220, duration=0.6, sr=SR)
         res = tr.track(v.audio, SR)
         assert res.ok and np.nanmedian(res.value.f0_hz) == pytest.approx(220, rel=0.02)
-
-
-def test_adapter_license_check_runs_at_construction(monkeypatch):
-    import gyeol.pitch.adapters as ad
-    from gyeol.core.license import AssetKind, LicensedAsset, LicenseTag
-
-    monkeypatch.setattr(ad, "lookup", lambda n: LicensedAsset(n, AssetKind.CHECKPOINT, LicenseTag.NONCOMMERCIAL, "NC"))
-    with pytest.raises(LicenseError):
-        ad.SwiftF0Tracker(Profile.COMMERCIAL)
 
 
 def test_yin_and_pyin_are_distinct_trackers():

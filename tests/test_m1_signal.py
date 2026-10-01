@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy import signal
 
-from gyeol.core import FrameGrid, Provenance, Status
+from gyeol.core import FrameGrid, Status
 from gyeol.frontend import BackingTrackCanceller, CallableSeparator, assess, detect_bleed, estimate_snr
 from gyeol.dsp.base import si_sdr
 from gyeol.synth import SynthNote, melody, phrase, sung_vowel
@@ -138,9 +138,9 @@ def test_quality_lowers_confidence_and_bad_input_fails():
     assert noise_only.status is Status.FAILED and "voiced" in noise_only.reason
 
 
-def test_representation_provenance_and_grid():
+def test_representation_grid():
     m = make_melody()
-    r = rep_of(m.audio, Provenance.USER, owner="u1").unwrap()
-    assert r.provenance is Provenance.USER and r.grid.hop == 512 and r.grid.sr == SR
+    r = rep_of(m.audio).unwrap()
+    assert r.grid.hop == 512 and r.grid.sr == SR
     for c in r.curves.values():
         assert c.grid == r.grid

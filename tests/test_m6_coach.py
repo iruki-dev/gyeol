@@ -12,13 +12,9 @@ import pytest
 from gyeol.coach import (
     AttemptMetrics,
     AttributeThreshold,
-    CoachConfig,
-    CoachSession,
     DiscriminationTrial,
-    FatigueMonitor,
     IntervalTrial,
     MelodyTrial,
-    PhonationLog,
     PitchMatchTrial,
     PracticeMap,
     PriorityConfig,
@@ -34,7 +30,8 @@ from gyeol.coach import (
     score_onboarding,
 )
 from gyeol.coach.health import load_norms
-from gyeol.core import Consistency, Explanation, ExplanationItem, FrameGrid, Provenance, Span
+from gyeol_service import CoachConfig, CoachSession, FatigueMonitor, PhonationLog  # revision C1: session state is in the service
+from gyeol.core import Consistency, Explanation, ExplanationItem, FrameGrid, Span
 
 GRID = FrameGrid(44100, 512, 400)
 
@@ -398,8 +395,8 @@ def test_phonation_time_and_fatigue():
 def test_attempt_metrics_from_a_representation():
     from .helpers import make_melody, rep_of
 
-    clean = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15).audio, Provenance.USER).unwrap())
-    breathy = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15, aspiration=0.4).audio, Provenance.USER).unwrap())
+    clean = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15).audio).unwrap())
+    breathy = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15, aspiration=0.4).audio).unwrap())
     assert np.isfinite([clean.instability_cents, clean.top_cents, clean.breath_db]).all()
     assert breathy.breath_db > clean.breath_db + 3
     assert clean.top_cents == pytest.approx(1200 * np.log2(392 / 440), abs=30)  # highest note G4
@@ -415,8 +412,8 @@ def test_coach_on_a_real_explanation():
     from .helpers import make_melody, pad_to, rep_of
 
     t, u = pad_to(make_melody().audio, make_melody(detune=(0, -45, 0, 0, 0, 0), shifts=(0, 0, 0, 0.09, 0, 0), seed=2).audio)
-    target = rep_of(t, Provenance.REFERENCE).unwrap()
-    exp = explain([rep_of(u, Provenance.USER).unwrap()], target).unwrap()
+    target = rep_of(t).unwrap()
+    exp = explain([rep_of(u).unwrap()], target).unwrap()
     notes = note_centres(target)
     s = CoachSession(thresholds(), voice_range=VR, target_notes_cents=notes)
     fb = s.new_attempt(exp).reveal()
@@ -430,8 +427,8 @@ def test_coach_on_a_real_explanation():
 def test_knob_recovery_fit_and_coach_example(tmp_path, capsys):
     import importlib.util
 
-    def load(name):
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[1] / "examples" / f"{name}.py")
+    def load(name, folder="examples"):
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[1] / folder / f"{name}.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
@@ -441,7 +438,9 @@ def test_knob_recovery_fit_and_coach_example(tmp_path, capsys):
     ts = ThresholdSet.from_json(th)
     assert ts.provenance["synthetic"] is True and ts.lookup("intonation_offset").usable
     assert ts.lookup("onset_timing").uncertainty(1.0) > 0
-    assert load("coach_demo_v2").main(["--synthetic", "--out", str(tmp_path), "--coach", str(th), "--noticed", "pitch"]) == 0
+    # revision C1: the coaching session is service state; its example lives in the reference service
+    demo = load("coach_session_demo", "reference_service/examples")
+    assert demo.main(["--synthetic", "--out", str(tmp_path), "--coach", str(th), "--noticed", "pitch"]) == 0
     out = capsys.readouterr().out
     assert "먼저 들어 볼 부분" in out and "센트 낮아요" in out and "합성 데이터" in out and "이비인후과" in out
     assert "스스로 느낀 부분이 맞아요" in out and "2번 부른 결과" in out

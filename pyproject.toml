@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gyeol"
 version = "2.0.0.dev0"
-description = "Interpretable singing-voice model for Korean vocal coaching: attribute curves, time-warp explanations and consent-gated own-voice demos"
+description = "Interpretable singing-voice model for Korean vocal coaching: attribute curves, time-warp explanations and stepwise practice demos"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "iruki-dev" }]
@@ -14,9 +14,9 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "torch>=2.2", "soundfile>=0.12"]
 
 [project.optional-dependencies]
 separation = []          # adapters load user-installed separators; see gyeol.frontend.separation
-ssl = []                 # SSL encoders are loaded from locally fetched checkpoints (M3)
+ssl = ["torchaudio>=2.2"]   # BSD-2: HuBERT / WavLM architectures; weights from locally fetched checkpoints (M3, B2)
 korean = ["g2pk"]
-train = ["omegaconf>=2.3"]
+train = ["pyyaml>=6", "torchaudio>=2.2"]   # MIT / BSD-2: YAML run configs, SSL fine-tuning (revision B)
 dev = ["pytest>=7", "ruff>=0.4"]
 onnx = ["onnx>=1.16", "onnxscript>=0.2", "onnxruntime>=1.17"]   # Apache-2.0 / MIT / MIT: server export (M8)
 

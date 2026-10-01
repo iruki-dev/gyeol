@@ -20,7 +20,6 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-from ..core.consent import Provenance
 from ..core.containers import Recording, Representation
 from ..core.status import Result
 
@@ -65,8 +64,8 @@ def vocoder_benchmark(resynth: Callable[[np.ndarray, int], np.ndarray], items: S
     acc: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for it in items:
         y = np.asarray(resynth(it.audio, it.sr), float)
-        a = analyzer(Recording(it.audio, it.sr, Provenance.SYNTHETIC))
-        b = analyzer(Recording(np.pad(y, (0, max(0, len(it.audio) - len(y))))[: len(it.audio)], it.sr, Provenance.SYNTHETIC))
+        a = analyzer(Recording(it.audio, it.sr))
+        b = analyzer(Recording(np.pad(y, (0, max(0, len(it.audio) - len(y))))[: len(it.audio)], it.sr))
         cat = str(it.labels.get(group_by, "unlabelled"))
         if not a.usable or not b.usable:
             acc[cat]["failed"].append(1.0)

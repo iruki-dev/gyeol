@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from gyeol.align import estimate_warp, onset_deviations
-from gyeol.core import Consistency, Provenance, Status
+from gyeol.core import Consistency, Status
 from gyeol.explain import ExplainConfig, explain
 from gyeol.explain.render_text import item_text, load_strings, particles
 
@@ -17,7 +17,7 @@ def target():
 
 def _pair(target_m, user_m):
     t, u = pad_to(target_m.audio, user_m.audio)
-    return rep_of(t, Provenance.REFERENCE).unwrap(), rep_of(u, Provenance.USER).unwrap()
+    return rep_of(t).unwrap(), rep_of(u).unwrap()
 
 
 def _items(exp):
@@ -62,8 +62,8 @@ def test_take_consistency(target):
         takes.append(make_melody(detune=(0, 0, d, 0, 0, 0), shifts=(0, 0, 0, s, 0, 0), vib=(0, 0, 60, 0, 60, 0),
                                  scoop=(0, 120, 0, 0, 0, 0), fall=(0, 0, 0, 0, 0, 150), dur=0.9, seed=seed + 1))
     arrays = pad_to(target.audio, *[t.audio for t in takes])
-    T = rep_of(arrays[0], Provenance.REFERENCE).unwrap()
-    U = [rep_of(a, Provenance.USER).unwrap() for a in arrays[1:]]
+    T = rep_of(arrays[0]).unwrap()
+    U = [rep_of(a).unwrap() for a in arrays[1:]]
     it = _items(explain(U, T).unwrap())
     flat = it[("pitch", "intonation_offset", 2)]
     assert flat.consistency is Consistency.STYLE_OR_HABIT and flat.magnitude == pytest.approx(-40, abs=8)
@@ -96,11 +96,14 @@ def test_semitone_transposition_is_opt_in(target):
 
 
 def test_explain_failure_modes(target):
-    T = rep_of(target.audio, Provenance.REFERENCE).unwrap()
+    T = rep_of(target.audio).unwrap()
     assert explain([], T).status is Status.FAILED
-    short = rep_of(make_melody().audio[: SR], Provenance.USER).unwrap()
+    # a hand-trimmed 1 s clip does not share the target's clock: explained on content alone, timing withheld (revision A3)
+    short = rep_of(make_melody().audio[: SR]).unwrap()
     r = explain([short], T)
-    assert r.status is Status.FAILED and "band" in r.reason
+    assert r.ok and r.value.comparison_mode["timing"] == "content_aligned"
+    assert not r.value.premises["shared_clock"].holds and "band" in r.value.premises["shared_clock"].reason
+    assert not any(i.attribute == "tempo" for i in r.value.items)
 
 
 def test_korean_rendering():
@@ -126,9 +129,11 @@ def test_demo_runs_end_to_end(tmp_path, capsys):
     assert mod.main(["--synthetic", "--out", str(tmp_path), "--audibility", "--render-demo"]) == 0
     out = capsys.readouterr().out
     assert "40센트 낮아요" in out and "스쿱" in out and "늦게 들어갔어요" in out
-    # M5: audibility per item and an AI-labelled own-voice demo
-    from gyeol.demo import read_label
+    # M5: audibility per item and a stepwise demo in the user's voice (plain WAVs + demo.json)
+    import json
 
-    assert "들리는 차이" in out and "AI로 생성" in out
+    assert "들리는 차이" in out
     demos = sorted(tmp_path.glob("demo_*.wav"))
-    assert len(demos) >= 2 and all(read_label(p)["ai_generated"] for p in demos)
+    assert len(demos) >= 2
+    meta = json.loads((tmp_path / "demo.json").read_text(encoding="utf-8"))
+    assert meta["schema"] == "gyeol.demo" and meta["version"] == 2 and "ai_generated" not in meta

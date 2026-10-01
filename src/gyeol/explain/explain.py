@@ -27,15 +27,25 @@ A difference with the same sign in every take and |mean| > SD is labelled
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from ..align.warp import Warp, WarpConfig, estimate_warp, onset_deviations, tempo_ratio
-from ..core.containers import Consistency, Explanation, ExplanationItem, Representation, Span
+from ..core.containers import Consistency, Explanation, ExplanationItem, Premise, Representation, Span, WithheldItem
 from ..core.status import Result
 from ..dsp.base import runs
 from .attributes import diction_items, phonation_dynamics_items, remainder_spans
+from .contour import ContourConfig, contour_items
+from .premises import (
+    PremiseConfig,
+    apply_premises,
+    check_interval_set,
+    check_level_chain,
+    check_noise_floor,
+    check_octave_relation,
+    check_shared_clock,
+)
 
 EVENT_KINDS = ("scoop", "fall", "kkeokki", "glide")
 
@@ -51,6 +61,19 @@ class ExplainConfig:
     cannot_judge_min_s: float = 0.1
     #: robust z-score of the residual difference above which frames are unexplained
     remainder_z: float = 4.0
+    #: revision A2/A3: premise checks; A5: whole-contour comparison
+    premises: PremiseConfig = field(default_factory=PremiseConfig)
+    contour: ContourConfig = field(default_factory=ContourConfig)
+
+
+def _fold_octave(raw_diff: np.ndarray, ref_mask: np.ndarray) -> np.ndarray:
+    """Octave-invariant difference: fold onto the 1200-cent circle around the circular mean of the reliable frames."""
+    r = raw_diff[ref_mask & np.isfinite(raw_diff)]
+    if r.size == 0:
+        return (raw_diff + 600.0) % 1200.0 - 600.0
+    ang = 2 * np.pi * r / 1200.0
+    centre = 1200.0 / (2 * np.pi) * np.arctan2(np.mean(np.sin(ang)), np.mean(np.cos(ang)))
+    return centre + ((raw_diff - centre + 600.0) % 1200.0 - 600.0)
 
 
 def _at(values: np.ndarray, tau: np.ndarray) -> np.ndarray:
@@ -71,30 +94,44 @@ class _Take:
     warp: Warp
     items: dict[tuple, ExplanationItem]
     cannot: list[Span]
-    transposition: float
+    transposition: float | None
+    premises: dict[str, Premise] = field(default_factory=dict)
+    withheld: list[WithheldItem] = field(default_factory=list)
+    modes: dict[str, str] = field(default_factory=dict)
 
 
-def _syllables_for(target: Representation, start: int, end: int) -> tuple[str, ...]:
+def _syllables_for(syllables: list, start: int, end: int) -> tuple[str, ...]:
     out = []
-    for s, e, text in target.meta.get("syllables", []):
+    for s, e, text in syllables:
         if s < end and e > start:
             out.append(text)
     return tuple(out)
 
 
-def _explain_take(user: Representation, target: Representation, cfg: ExplainConfig) -> Result[_Take]:
+def _explain_take(user: Representation, target: Representation, cfg: ExplainConfig, syllables: list | None = None) -> Result[_Take]:
+    syllables = list(target.meta.get("syllables", [])) if syllables is None else syllables
     if not user.grid.same_axis(target.grid):
         return Result.failure(f"user grid {user.grid} and target grid {target.grid} differ")
     for need in ("content", "pitch_center", "f0_cents"):
         if need not in user.curves or need not in target.curves:
             return Result.failure(f"missing curve {need!r}")
-    wr = estimate_warp(user.curves["content"].values, target.curves["content"].values, user.grid, cfg.warp)
-    if not wr.ok:
-        return Result.failure(f"alignment failed: {wr.reason}")
-    warp = wr.value
-    tau = warp.tau
     g = user.grid
     uc, tc = user.curves, target.curves
+    premises: dict[str, Premise] = {}
+    # A3 — premise: one clock.  Align around identity first; if the clock is not shared, align on content alone.
+    wr = estimate_warp(uc["content"].values, tc["content"].values, g, cfg.warp)
+    u_sung = np.isfinite(uc["pitch_center"].values) | (np.nan_to_num(uc["voicing"].values) > 0.5)
+    clock = check_shared_clock(user, target, wr.value if wr.ok else None, None if wr.ok else wr.reason, u_sung, cfg.premises)
+    premises[clock.name] = clock
+    if clock.holds:
+        warp, timing_mode = wr.value, "shared_clock"
+    else:
+        wide = replace(cfg.warp, band_seconds=max(user.grid.n_frames, target.grid.n_frames) * g.hop_seconds, open_begin=True)
+        wr2 = estimate_warp(uc["content"].values, tc["content"].values, g, wide)
+        if not wr2.ok:
+            return Result.failure(f"alignment failed: {wr2.reason}")
+        warp, timing_mode = wr2.value, "content_aligned"
+    tau = warp.tau
     u_center, u_conf = uc["pitch_center"].values, uc["f0_cents"].confidence
     t_center = _at(tc["pitch_center"].values, tau)
     t_conf = _at(tc["f0_cents"].confidence, tau)
@@ -103,10 +140,19 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
     if both.sum() < cfg.min_note_frames:
         return Result.failure("too few frames where both pitches and the alignment are reliable")
     raw_diff = u_center - t_center
-    d0 = float(np.median(raw_diff[both]))
+    # A2 — premise: the octave / key relation is decided only when both pitch tracks are confident
     step = 100.0 if cfg.allow_transposition else 1200.0
-    transposition = step * round(d0 / step)
-    diff = raw_diff - transposition
+    sung = u_sung | (_at(np.nan_to_num(tc["voicing"].values), tau) > 0.5)
+    rel = check_octave_relation(raw_diff, u_conf, t_conf, both, sung, step, cfg.premises)
+    premises[rel.name] = rel
+    if rel.holds:
+        transposition: float | None = float(rel.measures["transposition_cents"])
+        diff = raw_diff - transposition
+        pitch_mode = "absolute"
+    else:  # octave-invariant: fold every difference onto the octave circle around its circular mean
+        transposition = None
+        diff = _fold_octave(raw_diff, both)
+        pitch_mode = "octave_invariant"
     frame_conf = np.minimum(u_conf, t_conf) * warp.confidence
 
     items: dict[tuple, ExplanationItem] = {}
@@ -123,7 +169,7 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
         sel = np.flatnonzero((tau >= ns) & (tau < ne))
         if sel.size < cfg.min_note_frames:
             continue
-        span = Span(int(sel[0]), int(sel[-1]) + 1, _syllables_for(target, ns, ne))
+        span = Span(int(sel[0]), int(sel[-1]) + 1, _syllables_for(syllables, ns, ne))
         note_spans[k] = span
         # intonation: middle 60 % of the note (ornaments live at the edges)
         a, b = int(sel[0] + 0.2 * sel.size), int(sel[0] + 0.8 * sel.size)
@@ -136,7 +182,7 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
             items[("pitch", "intonation_offset", k)] = ExplanationItem(
                 "pitch", "intonation_offset", [span], d, "cents", float(np.mean(frame_conf[good])),
                 delta=delta, detail={"target_note": k})
-            note_centres.append((float(np.median(u_center[good]) - transposition), float(np.median(t_center[good]))))
+            note_centres.append((float(np.median(t_center[good]) + d), float(np.median(t_center[good]))))
         # vibrato
         fc = both[sel]
         if fc.mean() > 0.5:
@@ -154,14 +200,21 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
                     trr = float(np.nanmedian(t_rate[sel][t_vconf[sel] >= cfg.vibrato_presence_conf]))
                     items[("ornament", "vibrato_rate", k)] = ExplanationItem(
                         "ornament", "vibrato_rate", [span], ur - trr, "Hz", conf, detail={"target_note": k, "user": ur, "target": trr})
-        # onset timing
-        if k < len(devs):
+        # onset timing: absolute on a shared clock, else relative to the previous note (content-aligned)
+        # the onset must lie inside the stretch of the target the take covers (a trimmed clip may start mid-note)
+        if k < len(devs) and tau[0] + 2 <= ns <= tau[-1] - 2:
             dv = devs[k]
             uf = int(np.clip(round(dv.user_frame), 0, g.n_frames - 1))
             conf = float(np.mean(warp.confidence[max(0, uf - 3) : uf + 4]))
-            items[("rhythm", "onset_timing", k)] = ExplanationItem(
-                "rhythm", "onset_timing", [Span(uf, uf + 1, span.syllables)], dv.deviation_s * 1000.0, "ms", conf,
-                detail={"target_note": k})
+            if timing_mode == "shared_clock":
+                items[("rhythm", "onset_timing", k)] = ExplanationItem(
+                    "rhythm", "onset_timing", [Span(uf, uf + 1, span.syllables)], dv.deviation_s * 1000.0, "ms", conf,
+                    detail={"target_note": k, "reference": "shared clock"})
+            elif k > 0 and k - 1 < len(devs) and tau[0] + 2 <= notes[k - 1][0]:
+                rel_ms = (dv.deviation_s - devs[k - 1].deviation_s) * 1000.0
+                items[("rhythm", "onset_timing", k)] = ExplanationItem(
+                    "rhythm", "onset_timing", [Span(uf, uf + 1, span.syllables)], rel_ms, "ms", conf,
+                    detail={"target_note": k, "reference": "previous note"})
         # ornaments: match events of each kind inside the note
         for kind in EVENT_KINDS:
             t_ev = [e for e in target.events if e.kind == kind and ns <= e.start < ne]
@@ -185,10 +238,12 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
         items[("pitch", "global_offset", -1)] = ExplanationItem(
             "pitch", "global_offset", all_span, float(np.median(offs)), "cents", float(np.mean(frame_conf[both])),
             detail={"n_notes": len(offs)})
-    if len(note_centres) >= 4:
+    n_intervals = 0
+    if len(note_centres) >= 2:
         uc_, tc_ = np.array(note_centres).T
         ti, ui = np.diff(tc_), np.diff(uc_)
         use = np.abs(ti) >= 100
+        n_intervals = int(use.sum())
         if use.sum() >= 3:
             slope = float(np.dot(ui[use], ti[use]) / np.dot(ti[use], ti[use]))
             resid = ui[use] - slope * ti[use]
@@ -206,6 +261,20 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
     # M5: phonation, dynamics, diction
     items.update(phonation_dynamics_items(user, target, tau, warp.confidence, notes, note_spans, cfg.min_confidence))
     items.update(diction_items(user, target, tau, warp.confidence, cfg.min_confidence))
+    # A5: whole-contour comparison (attacks, releases, transitions)
+    for key, it in contour_items(user, target, tau, diff, u_conf, t_conf, warp.confidence, notes, syllables, cfg.contour).items():
+        # a span that only restates the note's own centre offset adds nothing to the intonation item
+        note = items.get(("pitch", "intonation_offset", key[2]))
+        if (it.attribute == "contour_deviation" and note is not None and np.sign(note.magnitude) == np.sign(it.magnitude)
+                and abs(it.magnitude - note.magnitude) < it.detail["detection_floor_cents"]):
+            continue
+        items[key] = it
+
+    # A3: every premise-dependent judgement is withheld when its premise fails
+    for pr in (check_level_chain(user, target, cfg.premises), check_noise_floor(user, target, cfg.premises),
+               check_interval_set(n_intervals, cfg.premises)):
+        premises[pr.name] = pr
+    items, withheld = apply_premises(items, premises)
 
     # cannot judge: voiced somewhere but not reliably comparable, or an unexplained residual remainder
     sung = np.isfinite(u_center) | (_at(tc["voicing"].values, tau) > 0.5)
@@ -215,18 +284,31 @@ def _explain_take(user: Representation, target: Representation, cfg: ExplainConf
     cannot += remainder_spans(user, target, tau, sung, cfg.remainder_z, min_len)
     for key in [k for k, it in items.items() if it.confidence < cfg.min_confidence]:
         cannot.extend(Span(sp.start, sp.end, sp.syllables, f"item_confidence:{key[1]}") for sp in items.pop(key).spans)
-    return Result.success(_Take(user, warp, items, cannot, transposition))
+    return Result.success(_Take(user, warp, items, cannot, transposition, premises, withheld,
+                                {"timing": timing_mode, "pitch": pitch_mode}))
 
 
-def explain(user_takes: list[Representation], target: Representation, config: ExplainConfig | None = None) -> Result[Explanation]:
-    """Explain the user's take(s) against the target phrase."""
+def explain(user_takes: list[Representation], target: Representation, config: ExplainConfig | None = None,
+            lyrics: str | None = None) -> Result[Explanation]:
+    """Explain the user's take(s) against the target phrase.
+
+    ``lyrics`` (optional) maps syllables onto the target's notes with
+    :func:`gyeol.context.assign_syllables` (Hangul split independent of spaces
+    and punctuation); otherwise ``target.meta["syllables"]`` is used if present.
+    """
     cfg = config or ExplainConfig()
     if not user_takes:
         return Result.failure("no user takes")
+    if lyrics is not None:
+        from ..context import assign_syllables
+
+        syllables = assign_syllables(target.meta.get("notes", []), lyrics)
+    else:
+        syllables = list(target.meta.get("syllables", []))
     takes: list[_Take] = []
     failures: list[str] = []
     for i, rep in enumerate(user_takes):
-        r = _explain_take(rep, target, cfg)
+        r = _explain_take(rep, target, cfg, syllables)
         if r.ok:
             takes.append(r.value)
         else:
@@ -250,6 +332,7 @@ def explain(user_takes: list[Representation], target: Representation, config: Ex
         grid=last.rep.grid, warp=last.warp.tau, transposition_cents=last.transposition, items=items,
         cannot_judge=sorted(last.cannot, key=lambda s: s.start), n_takes=len(takes),
         meta={"failed_takes": failures, "warp_confidence": last.warp.confidence, "user_quality": last.rep.quality,
-              "target_quality": target.quality},
+              "target_quality": target.quality, "syllables": syllables},
+        premises=last.premises, withheld=last.withheld, comparison_mode=last.modes,
     )
     return Result(Result.success(exp).status, exp, "", failures)

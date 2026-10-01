@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from gyeol.core import FrameGrid, LicenseError, Profile, Provenance, Status
+from gyeol.core import FrameGrid, Status
 
 # ================================================================ RMVPE
 
@@ -169,7 +169,7 @@ def test_robustness_grid_reports_icc_mdc_and_item_presence():
     for i, (d, sh) in enumerate([(-40, -0.06), (-15, 0.0), (10, 0.05), (35, 0.09)]):
         u = make_melody(detune=(0, d, 0, 0, 0, 0), shifts=(0, 0, sh, 0, 0, 0), dur=0.4, gap=0.15, seed=i + 1)
         t, uu = pad_to(tgt.audio, u.audio)
-        items.append(GridItem(f"p{i}", uu, 44100, rep_of(t, Provenance.REFERENCE).unwrap(), t))
+        items.append(GridItem(f"p{i}", uu, 44100, rep_of(t).unwrap(), t))
     rep = run_robustness(items, conds, analyzer=lambda r: analyze(r, trackers=dsp_trackers()), n_boot=50)
     assert not rep.failures
     ino = rep.items["pitch/intonation_offset/1"]
@@ -201,13 +201,11 @@ def _bench_index(tmp_path):
     return p
 
 
-def test_expert_benchmark_is_license_gated_and_scored(tmp_path):
+def test_expert_benchmark_is_loaded_and_scored(tmp_path):
     from gyeol.eval import Prediction, load_expert_benchmark, score_benchmark
 
     p = _bench_index(tmp_path)
-    with pytest.raises(LicenseError):
-        load_expert_benchmark(p, Profile.COMMERCIAL)  # research / non-commercial sources
-    rep = load_expert_benchmark(p, Profile.RESEARCH).unwrap()
+    rep = load_expert_benchmark(p).unwrap()
     assert [c.clip_id for c in rep.clips] == ["c1", "c2", "c3"] and "3" in rep.skipped
     assert rep.clips[0].labels == {"pitch", "rhythm"} and rep.clips[0].reference is not None and rep.clips[1].reference is None
     preds = {"c1": [Prediction("pitch", "intonation_offset", 1.2, 1.6, 0.9), Prediction("dynamics", "loudness", 5.0, 6.0, 0.8)],
@@ -269,24 +267,22 @@ def test_model_card_from_checkpoint(tmp_path):
 
     heads = FrameHeads(10, default_tasks(), hidden=16)
     save_checkpoint(tmp_path / "h.pt", heads.state_dict(), name="heads-demo", sources=["gyeol_synthetic", "vocalset"],
-                    config={"hidden": 16}, profile=Profile.COMMERCIAL)
+                    config={"hidden": 16})
     ev = [EvalTable("probe accuracy", {"register": 0.91, "ece": 0.03}, synthetic=True, data="synthetic melodies")]
-    lim = ["All evaluation so far is on synthetic data.", "License tags were not re-verified upstream by this code."]
+    lim = ["All evaluation so far is on synthetic data.", "Source licenses are copied from gyeol's asset list."]
     card = card_from_checkpoint(tmp_path / "h.pt", component="attribute heads", architecture="temporal-conv trunk + linear heads",
-                                intended_use=["Phonation posteriors for coaching explanations."], evaluation=ev, limitations=lim,
-                                profile=Profile.COMMERCIAL)
+                                intended_use=["Phonation posteriors for coaching explanations."], evaluation=ev, limitations=lim)
     assert card.validate() == []
-    assert card.license == "commercial_ok" and {s["name"] for s in card.sources} == {"gyeol_synthetic", "vocalset"}
+    assert {s["name"] for s in card.sources} == {"gyeol_synthetic", "vocalset"}
     assert card.parameters == sum(p.numel() for p in heads.parameters())
     md = card.to_markdown()
-    assert "| vocalset | dataset | `commercial_ok` | CC-BY-4.0 |" in md and "(synthetic data)" in md and "target-singer" in md
+    assert "| vocalset | dataset | CC-BY-4.0 |" in md and "(synthetic data)" in md and "without their permission" in md
     assert json.loads(card.to_json(tmp_path / "card.json").read_text())["name"] == "heads-demo"
     # a card that hides problems is flagged
-    bad = ModelCard("x", "c", "a", 1, "noncommercial", "commercial", "h",
-                    [{"name": "gtsinger", "kind": "dataset", "tag": "noncommercial", "license": "NC", "verified": False}], [],
+    bad = ModelCard("x", "c", "a", 1, "h", [{"name": "gtsinger", "kind": "dataset", "license": "CC-BY-NC-SA-4.0"}], [],
                     ["use"], list(REQUIRED_OUT_OF_SCOPE[:1]), ev, [])
     problems = " | ".join(bad.validate())
-    assert "non-commercial sources" in problems and "missing out-of-scope" in problems and "synthetic" in problems
+    assert "missing out-of-scope" in problems and "synthetic" in problems
     assert "Card validation problems" in bad.to_markdown()
 
 

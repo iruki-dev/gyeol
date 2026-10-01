@@ -309,3 +309,40 @@ def melody(notes: list[SynthNote], sr: int = 44100, lead_s: float = 0.2, tail_s:
         y = y + rng.standard_normal(total) * 10 ** (noise_db / 20)
     truth = {"f0_track": np.where(amp > 0.5, f0, 0.0), "notes": spans, "events": events, "transpose_cents": transpose_cents}
     return SynthVowel(audio=y, sr=sr, truth=truth)
+
+
+def accompaniment(duration_s: float, sr: int = 44100, root_hz: float = 130.81, bpm: float = 96.0, level_db: float = -18.0,
+                  drums: bool = True, seed: int = 0) -> np.ndarray:
+    """A backing track for tests: decaying piano-like chords (I–vi–IV–V), a bass line and hi-hat noise.
+
+    Not music — just the properties that matter for separation tests: several
+    simultaneous harmonic series, sustained energy in the vocal's rests,
+    low-frequency bass and broadband percussive transients.
+    """
+    rng = np.random.default_rng(seed)
+    n = int(duration_s * sr)
+    beat = 60.0 / bpm
+    y = np.zeros(n)
+    progression = [(0, 4, 7), (9, 12, 16), (5, 9, 12), (7, 11, 14)]  # semitones above the root
+    bar = 4 * beat
+    for b in range(int(np.ceil(duration_s / bar))):
+        chord = progression[b % len(progression)]
+        for k in range(4):  # one chord strike per beat
+            s0 = int((b * bar + k * beat) * sr)
+            if s0 >= n:
+                break
+            seg = np.arange(min(int(beat * 1.5 * sr), n - s0)) / sr
+            env = np.exp(-seg / 0.35)
+            for semi in chord:
+                f = root_hz * 2 ** ((semi + 12) / 12)
+                for h in range(1, 7):
+                    if h * f < sr / 2:
+                        y[s0 : s0 + len(seg)] += env * np.sin(2 * np.pi * h * f * seg + rng.uniform(0, 2 * np.pi)) / h**1.5
+            bass_f = root_hz / 2 * 2 ** (chord[0] / 12)
+            y[s0 : s0 + len(seg)] += 1.2 * env * (np.sin(2 * np.pi * bass_f * seg) + 0.3 * np.sin(4 * np.pi * bass_f * seg))
+            if drums:
+                hh = min(int(0.05 * sr), n - s0)
+                y[s0 : s0 + hh] += 0.4 * rng.standard_normal(hh) * np.exp(-np.arange(hh) / (0.01 * sr))
+    y = signal.sosfilt(signal.butter(2, 30, btype="highpass", fs=sr, output="sos"), y)
+    rms = np.sqrt(np.mean(y**2)) + 1e-12
+    return y / rms * 10 ** (level_db / 20)

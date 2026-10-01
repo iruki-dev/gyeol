@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 
-from ..core.consent import Provenance
 from ..core.containers import Recording
 from ..core.status import Result
 from ..dsp.base import resample as _resample
@@ -44,7 +43,7 @@ def save_audio(path: str | Path, x: np.ndarray, sr: int, *, metadata: dict[str, 
         f.write(np.asarray(x, dtype=np.float32))
 
 
-def load_recording(path: str | Path, provenance: Provenance, owner_id: str | None = None, license=None) -> Result[Recording]:
+def load_recording(path: str | Path) -> Result[Recording]:
     """Load a file into a :class:`Recording`, with an explicit status."""
     try:
         x, sr = load_audio(path)
@@ -54,4 +53,4 @@ def load_recording(path: str | Path, provenance: Provenance, owner_id: str | Non
         return Result.failure(f"{path} is empty")
     if not np.all(np.isfinite(x)):
         return Result.failure(f"{path} contains NaN/inf samples")
-    return Result.success(Recording(x, sr, provenance, owner_id=owner_id, license=license, meta={"path": str(path)}))
+    return Result.success(Recording(x, sr, meta={"path": str(path)}))

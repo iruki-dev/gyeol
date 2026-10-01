@@ -1,4 +1,3 @@
-import warnings
 
 import numpy as np
 import pytest
@@ -6,8 +5,8 @@ import torch
 
 from gyeol.attributes.extract import AnalysisConfig
 from gyeol.attributes.heads import CalibratedHeads, MahalanobisOOD, default_tasks, expected_calibration_error
-from gyeol.core import FrameGrid, LicenseError, Profile, Provenance, Recording, Status
-from gyeol.encoders import DSPFrameFeatures, TorchSSLEncoder, ssl_from_checkpoint
+from gyeol.core import FrameGrid, Recording, Status
+from gyeol.encoders import DSPFrameFeatures, TorchSSLEncoder
 from gyeol.eval import leakage, probe_battery, probe_classify, probe_regress
 from gyeol.train import load_checkpoint, save_checkpoint
 from gyeol.train.heads import FrameExample, HeadTrainConfig, train_heads
@@ -87,7 +86,7 @@ def test_learned_curves_in_analysis(heads, data):
     cfg = AnalysisConfig(heads=heads, feature_encoder=DSPFrameFeatures())
     from gyeol.attributes.extract import analyze
 
-    rep = analyze(Recording(it["audio"], SR, Provenance.SYNTHETIC), trackers=dsp_trackers(), config=cfg).unwrap()
+    rep = analyze(Recording(it["audio"], SR), trackers=dsp_trackers(), config=cfg).unwrap()
     reg = rep.curves["register"]
     assert reg.values.shape[1] == 3 and reg.labels == ("chest", "mixed", "falsetto")
     assert reg.meta["calibrated"] and reg.confidence.max() > 0
@@ -96,13 +95,11 @@ def test_learned_curves_in_analysis(heads, data):
     assert reg.confidence[~voiced].max() == 0.0
 
 
-def test_heads_checkpoint_roundtrip_with_license(heads, tmp_path):
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        save_checkpoint(tmp_path / "heads.pt", heads.model.state_dict(), name="heads", sources=["vocalset", "aihub_465_multi_singer"],
-                        config={"tasks": list(TASKS)}, profile=Profile.COMMERCIAL)
-        state, info = load_checkpoint(tmp_path / "heads.pt", Profile.COMMERCIAL)
-    assert info.license.value == "commercial_ok_conditional" and info.conditions
+def test_heads_checkpoint_roundtrip_with_provenance(heads, tmp_path):
+    save_checkpoint(tmp_path / "heads.pt", heads.model.state_dict(), name="heads", sources=["vocalset", "aihub_465_multi_singer"],
+                    config={"tasks": list(TASKS)})
+    state, info = load_checkpoint(tmp_path / "heads.pt")
+    assert info.source_names == ["vocalset", "aihub_465_multi_singer"] and info.sources[0]["license"] == "CC-BY-4.0"
     from gyeol.attributes.heads import FrameHeads
 
     m = FrameHeads(heads.model.norm.normalized_shape[0], TASKS, hidden=32)
@@ -151,15 +148,6 @@ def test_torch_ssl_encoder_projects_to_grid():
     assert f.shape == (g.n_frames, 8) and np.isfinite(f[2:-2]).all()
     assert enc.encode(np.zeros(100), SR, g).status is Status.FAILED
     assert not any(p.requires_grad for p in enc.module.parameters())
-
-
-def test_ssl_checkpoint_loading_is_license_gated(tmp_path, monkeypatch):
-    import gyeol.encoders.frame as fr
-    from gyeol.core.license import AssetKind, LicensedAsset, LicenseTag
-
-    monkeypatch.setitem(fr.__dict__, "lookup", lambda n: LicensedAsset(n, AssetKind.CHECKPOINT, LicenseTag.NONCOMMERCIAL, "NC"))
-    with pytest.raises(LicenseError):
-        ssl_from_checkpoint("hubert_base", str(tmp_path / "none.pt"), "some_nc_model", layers=(3,), profile=Profile.COMMERCIAL)
 
 
 # --- probes --------------------------------------------------------------------
