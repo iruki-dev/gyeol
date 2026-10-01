@@ -7,8 +7,11 @@ Three documents, each tagged with ``{"schema": <name>, "version": <int>}``:
 * ``gyeol.explanation`` — the comparison of user take(s) with a target: items
   with spans / syllables / magnitudes / confidences, cannot-judge spans,
   premises and withheld judgements, comparison modes, the time warp;
-* ``gyeol.demo`` — metadata of a rendered own-voice demo (AI label, consent
-  token id, edits, steps, clamping, profile); the audio itself is not included.
+* ``gyeol.demo`` — metadata of a rendered demo (renderer, steps, the items
+  and clamping each step applied); the audio itself is not included.
+
+Version history: representation v2 and demo v2 (revision E) dropped the
+``provenance`` field and the AI-label metadata; v1 documents are still read.
 
 JSON Schemas for the three live in ``gyeol/resources/schema/`` (draft 2020-12).
 Arrays are plain lists with ``null`` for NaN.  Readers accept any document
@@ -32,7 +35,6 @@ from typing import Any
 
 import numpy as np
 
-from .core.consent import Provenance
 from .core.containers import (
     AttributeCurve,
     AttributeCurves,
@@ -47,7 +49,7 @@ from .core.containers import (
 )
 from .core.grid import FrameGrid
 
-VERSIONS = {"gyeol.representation": 1, "gyeol.explanation": 1, "gyeol.demo": 1}
+VERSIONS = {"gyeol.representation": 2, "gyeol.explanation": 1, "gyeol.demo": 2}
 _DROP_META = {"separated_audio"}
 
 
@@ -107,13 +109,13 @@ def _grid(g: FrameGrid) -> dict:
 
 def representation_to_dict(rep: Representation, *, include_biometric: bool = False) -> dict:
     d = _header("gyeol.representation")
-    d.update(grid=_grid(rep.grid), recording_id=rep.recording_id, provenance=rep.provenance.value,
+    d.update(grid=_grid(rep.grid), recording_id=rep.recording_id,
              curves={n: {"unit": c.unit, "labels": list(c.labels), "values": jsonable(c.values), "confidence": jsonable(c.confidence),
                          "meta": jsonable(c.meta)} for n, c in rep.curves.items()},
              events=[jsonable(e) for e in rep.events], quality=jsonable(rep.quality), meta=jsonable(rep.meta),
              env=None if rep.env is None else jsonable(rep.env))
     if include_biometric:
-        d["singer"] = None if rep.singer is None else {"vector": jsonable(rep.singer.vector), "provenance": rep.singer.provenance.value,
+        d["singer"] = None if rep.singer is None else {"vector": jsonable(rep.singer.vector),
                                                        "source_recording_id": rep.singer.source_recording_id}
         d["residual"] = None if rep.residual is None else jsonable(rep.residual)
     return d
@@ -128,7 +130,7 @@ def representation_from_dict(d: dict) -> Representation:
                                   dict(c.get("meta", {}))))
     events = [Event(**e) for e in d.get("events", [])]
     env = None if d.get("env") is None else _arr(d["env"])
-    return Representation(g, curves, d["recording_id"], Provenance(d["provenance"]), events, None, env, None,
+    return Representation(g, curves, d["recording_id"], events, None, env, None,
                           dict(d.get("quality", {})), dict(d.get("meta", {})))
 
 
@@ -172,14 +174,12 @@ def explanation_from_dict(d: dict) -> Explanation:
 
 
 def demo_to_dict(demo, item_key=None, files: dict[str, str] | None = None) -> dict:
-    """Metadata of a :class:`gyeol.demo.Demo` (no audio): the baseline label and every step's label and clamping."""
+    """Metadata of a :class:`gyeol.demo.Demo` (no audio): renderer, and what every step applied."""
     d = _header("gyeol.demo")
-    base = dict(demo.baseline.metadata)
-    d.update(selected_item=None if item_key is None else list(item_key), sr=int(demo.baseline.sr), ai_generated=bool(base.get("ai_generated")),
-             profile=base.get("profile", "commercial"), baseline=jsonable(base),
+    d.update(selected_item=None if item_key is None else list(item_key), sr=int(demo.sr), renderer=demo.renderer,
              steps=[{"label": st.step.label, "alpha": jsonable(st.step.alpha), "selected": list(st.step.selected),
                      "others": [list(k) for k in st.step.others], "clamped_fraction": jsonable(st.clamp.clamped_fraction),
-                     "metadata": jsonable(st.audio.metadata)} for st in demo.steps],
+                     "applied": jsonable(st.applied)} for st in demo.steps],
              files=dict(files or {}))
     return d
 

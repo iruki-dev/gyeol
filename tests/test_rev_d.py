@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from gyeol import api
-from gyeol.core.license import REGISTRY, AssetKind, LicensedAsset, LicenseError, LicenseTag
 from gyeol.frontend.separation import (
     CallableSeparator,
     SeparationCache,
@@ -78,10 +77,10 @@ def test_background_queue_separates_once(song, tmp_path):
 def test_target_analysis_uses_the_cached_vocal(song, tmp_path):
     voc, _, mix = song
     ts = api.separate_target(mix, SR, cache_dir=tmp_path, separator=_Counting(voc), separator_id="oracle").unwrap()
-    t = api.analyze(mix, SR, role="reference", separated=ts, dsp_only=True).unwrap()
+    t = api.analyze(mix, SR, separated=ts, dsp_only=True).unwrap()
     q = t.quality["separation"]
     assert q["applied"] and "(cached)" in q["separator"]
-    clean = api.analyze(voc, SR, role="reference", dsp_only=True).unwrap()
+    clean = api.analyze(voc, SR, dsp_only=True).unwrap()
     both = np.isfinite(t.curves["f0_cents"].values) & np.isfinite(clean.curves["f0_cents"].values)
     assert np.median(np.abs(t.curves["f0_cents"].values[both] - clean.curves["f0_cents"].values[both])) < 5
 
@@ -90,12 +89,12 @@ def test_headphone_takes_are_separated_only_when_bleed_is_detected(song, tmp_pat
     voc, back, mix = song
     ts = api.separate_target(mix, SR, cache_dir=tmp_path, separator=_Counting(voc), separator_id="oracle").unwrap()
     take = make_melody(seed=4, vib=(25,) * 6, detune=(0, 0, 30, 0, 0, 0)).audio
-    clean = api.analyze(take, SR, owner_id="u", target=ts, dsp_only=True).unwrap()
+    clean = api.analyze(take, SR, target=ts, dsp_only=True).unwrap()
     q = clean.quality["separation"]
     assert not q["applied"] and q["bleed"]["detected"] is False and q["reason"] == "no accompaniment bleed detected"
     lag = 300
     bled = take + np.r_[np.zeros(lag), back[:-lag]] / _rms(back) * _rms(take) * 10 ** (-15 / 20)
-    r = api.analyze(bled, SR, owner_id="u", target=ts, dsp_only=True).unwrap()
+    r = api.analyze(bled, SR, target=ts, dsp_only=True).unwrap()
     q = r.quality["separation"]
     assert q["applied"] and q["separator"] == "backing-cancel" and q["bleed"]["detected"] is True
     assert q["bleed"]["lag_s"] == pytest.approx(lag / SR, abs=2e-3)
@@ -132,8 +131,6 @@ def test_separator_choice():
 
 
 def test_roformer_weights_are_checksum_verified(tmp_path, monkeypatch):
-    import dataclasses
-
     import torch
 
     from gyeol.frontend import roformer
@@ -142,11 +139,10 @@ def test_roformer_weights_are_checksum_verified(tmp_path, monkeypatch):
     path = tmp_path / "w.ckpt"
     torch.save(BSRoFormer(**tiny_config()).state_dict(), path)
     digest = file_sha256(path)
-    real = roformer.lookup
-    monkeypatch.setattr(roformer, "lookup", lambda name: dataclasses.replace(real(name), sha256=digest))
+    monkeypatch.setattr(roformer, "pinned_sha256", lambda name: digest)
     sep = RoFormerSeparator.from_checkpoint(path, tiny_config())
     assert sep.weights_sha256 == digest
-    monkeypatch.setattr(roformer, "lookup", lambda name: dataclasses.replace(real(name), sha256="0" * 64))
+    monkeypatch.setattr(roformer, "pinned_sha256", lambda name: "0" * 64)
     with pytest.raises(ValueError, match="checksum mismatch"):
         RoFormerSeparator.from_checkpoint(path, tiny_config())
 
@@ -182,7 +178,7 @@ def test_resynthesised_copies_carry_exact_f0(resynth_cache):
         assert s.rpa > 0.9  # the copy really sounds at its stated f0
 
 
-def test_resynthesis_never_touches_app_users(tmp_path):
+def test_resynthesis_skip_list_is_a_configurable_default(tmp_path):
     from gyeol.data.manifest import Manifest, ManifestItem
     from gyeol.data.prepare import PrepareConfig, prepare
     from gyeol.io import save_audio
@@ -190,7 +186,11 @@ def test_resynthesis_never_touches_app_users(tmp_path):
     save_audio(tmp_path / "a.wav", make_melody(seed=1).audio, SR)
     m = Manifest("own_recordings", str(tmp_path), [ManifestItem("a.wav", "user-1", {})])
     rep = prepare([m], tmp_path / "c", config=PrepareConfig(sr=16000, hop=128, separation="off", resynthesize=("hnm",)))
-    assert rep.done == 1 and rep.failed == 1 and "not allowed" in rep.failures[0]["reason"]
+    assert rep.done == 1 and rep.failed == 1 and "resynth_skip_datasets" in rep.failures[0]["reason"]
+    # the application decides: an empty skip list resynthesises its own recordings too
+    rep = prepare([m], tmp_path / "d", config=PrepareConfig(sr=16000, hop=128, separation="off", resynthesize=("hnm",),
+                                                            resynth_skip_datasets=()))
+    assert rep.done == 2 and rep.failed == 0
 
 
 def test_pitch_targets_weight_exact_over_consensus(resynth_cache):
@@ -215,10 +215,6 @@ def test_pitch_targets_weight_exact_over_consensus(resynth_cache):
     assert ((cents.numpy()[is_copy] == 0) & (w[is_copy] == 1)).any()  # exact unvoiced frames are trained as such
 
 
-def _register(monkeypatch, name, tag=LicenseTag.COMMERCIAL_OK):
-    monkeypatch.setitem(REGISTRY, name, LicensedAsset(name, AssetKind.DATASET, tag, "test", "test fixture"))
-
-
 def _fake_vocadito(root: Path, n=2):
     from gyeol.io import save_audio
 
@@ -233,7 +229,7 @@ def _fake_vocadito(root: Path, n=2):
         (root / "Annotations" / "F0" / f"vocadito_{i}_f0.csv").write_text("\n".join(f"{a:.4f},{b:.2f}" for a, b in zip(t, hz)))
 
 
-def test_annotated_sets_are_gated_and_scored(tmp_path, monkeypatch):
+def test_annotated_sets_are_scored(tmp_path):
     from gyeol.data.pitch_sets import read_reference_f0, scan_mir1k, scan_vocadito
     from gyeol.eval.pitch_eval import evaluate_pitch
 
@@ -241,13 +237,7 @@ def test_annotated_sets_are_gated_and_scored(tmp_path, monkeypatch):
     man = scan_vocadito(tmp_path / "voc").unwrap()
     pairs = {i.path: i.meta["f0"] for i in man.items}
     assert pairs["Audio/vocadito_1.wav"].endswith("vocadito_1_f0.csv") and pairs["Audio/vocadito_10.wav"].endswith("vocadito_10_f0.csv")
-    monkeypatch.delitem(REGISTRY, "vocadito", raising=False)
-    with pytest.raises(LicenseError, match="not in the license registry"):
-        evaluate_pitch(man, dsp_trackers()[0])
-    _register(monkeypatch, "vocadito", LicenseTag.NONCOMMERCIAL)
-    with pytest.raises(LicenseError):
-        evaluate_pitch(man, dsp_trackers()[0])  # commercial profile
-    rep = evaluate_pitch(man, dsp_trackers()[0], "research").unwrap().summary()
+    rep = evaluate_pitch(man, dsp_trackers()[0]).unwrap().summary()
     assert rep["n_items"] == 2 and rep["rpa"] > 0.85 and rep["voicing_recall"] > 0.85
     # MIR-1K: stereo (accompaniment left, voice right), semitones per 20 ms
     import soundfile as sf
@@ -268,32 +258,27 @@ def test_annotated_sets_are_gated_and_scored(tmp_path, monkeypatch):
     assert mm.items[0].singer == "abjones" and mm.items[0].meta["channel"] == 1
     rt, rhz = read_reference_f0(mm.root, mm.items[0])
     assert rt[0] == pytest.approx(0.02) and np.allclose(rhz[hz > 0], hz[hz > 0], rtol=1e-3)
-    _register(monkeypatch, "mir1k", LicenseTag.UNKNOWN)
-    with pytest.raises(LicenseError):
-        evaluate_pitch(mm, dsp_trackers()[0], "commercial")
-    assert evaluate_pitch(mm, dsp_trackers()[0], "research").unwrap().summary()["rpa"] > 0.8
+    assert evaluate_pitch(mm, dsp_trackers()[0]).unwrap().summary()["rpa"] > 0.8
 
 
-def test_eval_pitch_cli(tmp_path, monkeypatch, capsys):
+def test_eval_pitch_cli(tmp_path, capsys):
     from gyeol.cli import main
     from gyeol.data.pitch_sets import scan_vocadito
 
     _fake_vocadito(tmp_path / "voc", n=1)
     scan_vocadito(tmp_path / "voc").unwrap().write(tmp_path / "voc.json")
-    _register(monkeypatch, "vocadito")
     assert main(["eval", "pitch", str(tmp_path / "voc.json")]) == 0
     out = capsys.readouterr().out
     assert "vocadito / pyin" in out and "RPA" in out
 
 
-def test_pitch_run_reports_annotated_evaluation(resynth_cache, tmp_path, monkeypatch):
+def test_pitch_run_reports_annotated_evaluation(resynth_cache, tmp_path):
     from gyeol.data.pitch_sets import scan_vocadito
     from gyeol.train.config import config_from_dict
     from gyeol.train.runner import train
 
     _fake_vocadito(tmp_path / "voc", n=1)
     scan_vocadito(tmp_path / "voc").unwrap().write(tmp_path / "voc.json")
-    _register(monkeypatch, "vocadito")
     cfg = config_from_dict({"task": "pitch", "device": "cpu", "threads": 1,
                             "data": {"cache": str(resynth_cache), "split": {"train": 0.5, "val": 0.5, "test": 0.0},
                                      "crop_frames": [16, 24], "batch_size": 2, "prepare": {"sr": 16000, "hop": 128, "separation": "off"}},

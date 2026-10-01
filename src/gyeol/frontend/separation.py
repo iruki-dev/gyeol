@@ -1,13 +1,10 @@
 """Singing-voice separation adapters.
 
 gyeol ships no separator weights.  Adapters wrap separators the user has
-installed and fetched, and every adapter names its license-registry asset so
-the active profile is enforced:
+installed or downloaded (``gyeol fetch``):
 
 * :class:`CallableSeparator` – any ``f(audio, sr) -> vocals`` (e.g. a Mel- or
-  BS-RoFormer inference function); pass the asset name for its weights
-  (``"roformer_community"`` by default, whose training-data provenance is
-  flagged as unclear).
+  BS-RoFormer inference function).
 * :class:`DemucsSeparator` – HTDemucs through the optional ``demucs`` package.
 * :class:`BackingTrackCanceller` – the sing-along case: the backing track is
   known, so its leakage is cancelled by least squares per frequency.
@@ -24,7 +21,6 @@ from typing import Callable
 import numpy as np
 from scipy import signal
 
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 from ..dsp.base import resample, si_sdr, to_mono
 
@@ -32,9 +28,7 @@ EPS = 1e-12
 
 
 class CallableSeparator:
-    def __init__(self, fn: Callable[[np.ndarray, int], np.ndarray], name: str = "roformer", asset: str = "roformer_community",
-                 profile: Profile = Profile.COMMERCIAL):
-        require_allowed(lookup(asset), profile, announce=False)
+    def __init__(self, fn: Callable[[np.ndarray, int], np.ndarray], name: str = "roformer", asset: str | None = None):
         self.fn, self.name, self.asset = fn, name, asset
 
     def separate(self, audio: np.ndarray, sr: int) -> Result[np.ndarray]:
@@ -50,12 +44,8 @@ class CallableSeparator:
 class DemucsSeparator:
     name = "htdemucs"
 
-    def __init__(self, model: str = "htdemucs", device: str = "cpu", asset: str | None = None, profile: Profile = Profile.COMMERCIAL):
-        # HTDemucs is not yet in the registry; the caller must register its weights' license
-        if asset is None:
-            raise ValueError("register the Demucs weights in the license registry and pass asset=<name>")
-        require_allowed(lookup(asset), profile, announce=False)
-        self.model, self.device = model, device
+    def __init__(self, model: str = "htdemucs", device: str = "cpu", asset: str | None = None):
+        self.model, self.device, self.asset = model, device, asset
 
     def separate(self, audio: np.ndarray, sr: int) -> Result[np.ndarray]:
         try:
@@ -285,7 +275,7 @@ def separation_quality(mixture: np.ndarray, stem: np.ndarray, sr: int, grid, *, 
 _SEPARATOR_CACHE: dict = {}
 
 
-def default_separator(profile: Profile = Profile.COMMERCIAL, backing: np.ndarray | None = None, backing_sr: int | None = None) -> Result:
+def default_separator(backing: np.ndarray | None = None, backing_sr: int | None = None) -> Result:
     """The separator ``analyze`` uses when none is given (never downloads):
 
     1. the known backing track → :class:`BackingTrackCanceller`;
@@ -294,12 +284,12 @@ def default_separator(profile: Profile = Profile.COMMERCIAL, backing: np.ndarray
     """
     if backing is not None:
         return Result.success(BackingTrackCanceller(np.asarray(backing, float), backing_sr or 44100))
-    key = ("roformer", Profile(profile))
+    key = "roformer"
     if key in _SEPARATOR_CACHE:
         return _SEPARATOR_CACHE[key]
     from .roformer import RoFormerSeparator
 
-    r = RoFormerSeparator.from_cache(profile=profile)
+    r = RoFormerSeparator.from_cache()
     if r.ok:  # only successes are cached: a fetch later in the process is picked up
         _SEPARATOR_CACHE[key] = r
     return r
@@ -317,17 +307,17 @@ def default_separator(profile: Profile = Profile.COMMERCIAL, backing: np.ndarray
 SEPARATORS = {"bs_roformer": "heavy", "roformer_light": "light", "htdemucs": "light", "backing": "light"}
 
 
-def make_separator(name, profile: Profile = Profile.COMMERCIAL, *, accompaniment: np.ndarray | None = None,
+def make_separator(name, *, accompaniment: np.ndarray | None = None,
                    accompaniment_sr: int | None = None, checkpoint: str | None = None, config: dict | None = None,
                    asset: str | None = None) -> Result:
     """A separator by name (or pass an object with ``separate(audio, sr)`` through).
 
     * ``bs_roformer`` — fetched viperx BS-RoFormer weights (heavy; for target songs);
-    * ``roformer_light`` — a smaller BS-RoFormer from a local ``checkpoint`` with its ``config`` and registry ``asset``;
-    * ``htdemucs`` — HTDemucs (needs the ``demucs`` package and its weights registered as ``asset``);
+    * ``roformer_light`` — a smaller BS-RoFormer from a local ``checkpoint`` with its ``config``;
+    * ``htdemucs`` — HTDemucs (needs the ``demucs`` package);
     * ``backing`` — subtracts a known ``accompaniment`` (e.g. the cached accompaniment of the target song).
 
-    Never downloads; every weight file passes the license gate for ``profile``.
+    Never downloads.
     """
     if hasattr(name, "separate"):
         return Result.success(name)
@@ -338,14 +328,14 @@ def make_separator(name, profile: Profile = Profile.COMMERCIAL, *, accompaniment
             return Result.unavailable("the backing canceller needs the accompaniment (separate the target song first)")
         return Result.success(BackingTrackCanceller(np.asarray(accompaniment, float), accompaniment_sr or 44100))
     if name == "bs_roformer":
-        return default_separator(profile)
+        return default_separator()
     if name == "roformer_light":
         if not checkpoint:
-            return Result.unavailable("roformer_light needs a local checkpoint, its config and its registry asset")
+            return Result.unavailable("roformer_light needs a local checkpoint and its config")
         from .roformer import RoFormerSeparator
 
         try:
-            return Result.success(RoFormerSeparator.from_checkpoint(checkpoint, config, asset=asset or "roformer_community", profile=profile,
+            return Result.success(RoFormerSeparator.from_checkpoint(checkpoint, config, asset=asset or "roformer_community",
                                                                     name="roformer-light"))
         except (FileNotFoundError, ValueError, RuntimeError) as exc:
             return Result.failure(f"roformer_light: {exc}")
@@ -353,9 +343,7 @@ def make_separator(name, profile: Profile = Profile.COMMERCIAL, *, accompaniment
         import demucs  # noqa: F401
     except ImportError:
         return Result.unavailable("htdemucs needs the demucs package")
-    if asset is None:
-        return Result.unavailable("register the HTDemucs weights in the license registry and pass asset=<name>")
-    return Result.success(DemucsSeparator(asset=asset, profile=profile))
+    return Result.success(DemucsSeparator(asset=asset))
 
 
 @dataclass
@@ -424,7 +412,7 @@ class SeparationCache:
 
 
 def separate_target(audio: np.ndarray, sr: int, *, cache: SeparationCache | None = None, separator="bs_roformer",
-                    profile: Profile = Profile.COMMERCIAL, separator_id: str | None = None, **kw) -> Result[TargetSeparation]:
+                    separator_id: str | None = None, **kw) -> Result[TargetSeparation]:
     """Separate a target song once; with a ``cache``, the result is stored and later calls return it without separating."""
     import time
 
@@ -436,7 +424,7 @@ def separate_target(audio: np.ndarray, sr: int, *, cache: SeparationCache | None
         if hit is not None:
             hit.meta["cache"] = "hit"
             return Result.success(hit)
-    sep = make_separator(separator, profile, **kw)
+    sep = make_separator(separator, **kw)
     if not sep.ok:
         return Result(sep.status, None, sep.reason)
     t0 = time.perf_counter()
@@ -446,7 +434,7 @@ def separate_target(audio: np.ndarray, sr: int, *, cache: SeparationCache | None
     vocal = np.asarray(out.value, float)[: len(x)]
     vocal = np.pad(vocal, (0, len(x) - len(vocal)))
     ts = TargetSeparation(key, vocal, x - vocal, int(sr), sid, {"separator_name": getattr(sep.value, "name", sid), "seconds": time.perf_counter() - t0,
-                                                                "asset": getattr(sep.value, "asset", None), "profile": Profile(profile).value,
+                                                                "asset": getattr(sep.value, "asset", None),
                                                                 "weights_sha256": getattr(sep.value, "weights_sha256", None), "cache": "miss"})
     if cache is not None:
         cache.put(ts)
@@ -465,14 +453,14 @@ class SeparationQueue:
         self._pending: dict = {}
         self._lock = Lock()
 
-    def submit(self, audio: np.ndarray, sr: int, *, separator="bs_roformer", profile: Profile = Profile.COMMERCIAL,
+    def submit(self, audio: np.ndarray, sr: int, *, separator="bs_roformer",
                separator_id: str | None = None, **kw):
         sid = separator_id or (separator if isinstance(separator, str) else getattr(separator, "name", type(separator).__name__))
         key = content_key(audio, sr, sid)
         with self._lock:
             fut = self._pending.get(key)
             if fut is None or (fut.done() and not fut.result().ok):
-                fut = self._pool.submit(separate_target, audio, sr, cache=self.cache, separator=separator, profile=profile,
+                fut = self._pool.submit(separate_target, audio, sr, cache=self.cache, separator=separator,
                                         separator_id=sid, **kw)
                 self._pending[key] = fut
         return fut

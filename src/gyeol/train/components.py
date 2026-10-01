@@ -1,4 +1,4 @@
-"""Per-component training modes and license-gated initial weights (revision B5).
+"""Per-component training modes and initial weights from local files (revision B5).
 
 Every trainable component of a task has a mode:
 
@@ -13,14 +13,12 @@ Components: ``ssl`` (SSL encoder), ``pitch`` (RMVPE), ``residual_encoder``,
 ``singer_encoder``, ``env_encoder``, ``acoustic``, ``vocoder``,
 ``discriminators``, and ``heads``.
 
-Initial weights always come from a **local** file, through the license gate:
+Initial weights always come from a **local** file:
 
 * a gyeol checkpoint (written by :func:`gyeol.train.checkpoint.save_checkpoint`)
-  is opened with :func:`load_checkpoint` under the run's profile — its
-  embedded license tag becomes part of the new run's lineage;
-* a registered third-party checkpoint (``asset: rmvpe``, ``asset: hubert_fairseq``…)
-  is opened with :func:`load_third_party` after :func:`require_allowed` for
-  that asset.
+  is read with :func:`load_checkpoint`, and it is recorded as a parent of the new run;
+* a third-party weight file (``asset: rmvpe``, ``asset: hubert_fairseq``…, names
+  from :mod:`gyeol.core.assets`) is read directly, and the asset is recorded as a source.
 
 Nothing is downloaded.
 """
@@ -36,8 +34,7 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
-from ..core.license import LicenseTag, Profile, lookup
-from .checkpoint import CheckpointInfo, load_checkpoint, load_third_party
+from .checkpoint import CheckpointInfo, load_checkpoint, load_weights
 
 MODES = ("scratch", "finetune", "freeze")
 COMPONENTS = ("ssl", "pitch", "residual_encoder", "singer_encoder", "env_encoder", "acoustic", "vocoder", "discriminators", "heads")
@@ -82,9 +79,6 @@ class Lineage:
     assets: list[str] = field(default_factory=list)
     parents: list[CheckpointInfo] = field(default_factory=list)
 
-    def tags(self) -> list[LicenseTag]:
-        return [lookup(a).tag for a in self.assets] + [p.license for p in self.parents]
-
 
 def _select(sd: dict, prefix: str) -> dict:
     if not prefix:
@@ -92,22 +86,22 @@ def _select(sd: dict, prefix: str) -> dict:
     return {k[len(prefix):]: v for k, v in sd.items() if k.startswith(prefix)}
 
 
-def load_initial_weights(module: nn.Module, spec: InitSpec, profile: Profile, lineage: Lineage,
+def load_initial_weights(module: nn.Module, spec: InitSpec, lineage: Lineage,
                          loader: Callable[[nn.Module, dict], None] | None = None) -> None:
-    """Load ``spec`` into ``module`` after the license gate and record it in ``lineage``."""
+    """Load ``spec`` into ``module`` and record where the weights came from in ``lineage``."""
     path = Path(spec.path).expanduser()
     if not path.is_file():
         hint = f" (fetch it with `gyeol fetch {spec.asset}`)" if spec.asset else ""
         raise FileNotFoundError(f"initial weights not found: {path}{hint}")
     if spec.asset:
-        sd = load_third_party(path, spec.asset, profile)
+        sd = load_weights(path)
         if isinstance(sd, dict) and "state_dict" in sd and isinstance(sd["state_dict"], dict):
             sd = sd["state_dict"]
         if isinstance(sd, dict) and "model" in sd and isinstance(sd["model"], dict):
             sd = sd["model"]
         lineage.assets.append(spec.asset)
     else:
-        sd, info = load_checkpoint(path, profile)
+        sd, info = load_checkpoint(path)
         lineage.parents.append(info)
     sd = _select(sd, spec.prefix)
     if loader is not None:

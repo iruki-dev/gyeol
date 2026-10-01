@@ -18,7 +18,6 @@ the per-frame SNR factor, and clipping zeroes aperiodicity confidence.
 
 from __future__ import annotations
 
-import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -26,10 +25,8 @@ from typing import Sequence
 import numpy as np
 
 from ..align.content import ContentFeatures, MFCCContent
-from ..core.consent import Provenance
 from ..core.containers import AttributeCurve, AttributeCurves, Recording, Representation
 from ..core.grid import DEFAULT_HOP, FrameGrid
-from ..core.license import Profile
 from ..core.status import Result
 from ..frontend.quality import QualityPolicy, assess
 from ..frontend.separation import (
@@ -52,7 +49,6 @@ from .signal import harmonic_noise, loudness, relative_loudness
 @dataclass
 class AnalysisConfig:
     hop: int = DEFAULT_HOP
-    profile: Profile = Profile.COMMERCIAL
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     quality: QualityPolicy = field(default_factory=QualityPolicy)
     events: EventConfig = field(default_factory=EventConfig)
@@ -100,7 +96,7 @@ def _separate(recording: Recording, mode: str, separator, backing, cfg: Analysis
             report["reason"] = "no accompaniment bleed detected"
             return Result.success((x, report, warnings))
         if separator is None or isinstance(separator, str):
-            separator_r = make_separator(separator or cfg.take.separator, cfg.profile, accompaniment=accompaniment_ref, accompaniment_sr=sr)
+            separator_r = make_separator(separator or cfg.take.separator, accompaniment=accompaniment_ref, accompaniment_sr=sr)
             if not separator_r.ok:
                 report["reason"] = f"bleed detected but no separator available: {separator_r.reason}"
                 warnings.append("accompaniment bleed detected and not separated: confidences reduced")
@@ -120,9 +116,9 @@ def _separate(recording: Recording, mode: str, separator, backing, cfg: Analysis
         report["reason"] = "no accompaniment detected"
         return Result.success((x, report, warnings))
     if isinstance(separator, str):
-        sep = make_separator(separator, cfg.profile, accompaniment=backing, accompaniment_sr=sr)
+        sep = make_separator(separator, accompaniment=backing, accompaniment_sr=sr)
     else:
-        sep = Result.success(separator) if separator is not None else default_separator(cfg.profile, backing, sr)
+        sep = Result.success(separator) if separator is not None else default_separator(backing, sr)
     if not sep.ok:
         if mode == "always":
             return Result.failure(f"separation required but unavailable: {sep.reason}")
@@ -199,7 +195,7 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     lap("separation")
     xc = x - np.mean(x)
 
-    pr = consensus(xc, sr, grid, list(trackers) if trackers else default_trackers(cfg.profile), cfg.consensus)
+    pr = consensus(xc, sr, grid, list(trackers) if trackers else default_trackers(), cfg.consensus)
     if not pr.usable:
         return Result.failure(f"pitch analysis failed: {pr.reason}")
     p = pr.value
@@ -252,7 +248,7 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
     events = detect_events(cents, center, voiced, f0_conf, vconf, notes, grid, cfg.events)
     lap("events")
     rep = Representation(
-        grid=grid, curves=curves, recording_id=recording.recording_id, provenance=recording.provenance, events=events,
+        grid=grid, curves=curves, recording_id=recording.recording_id, events=events,
         quality={"flags": dict(q.flags), "separation": sep_report, "snr_db": None if q.snr is None else q.snr.snr_db,
                  "bandwidth_hz": None if q.bandwidth is None else q.bandwidth.bandwidth_hz,
                  "clipping_fraction": q.clipping.fraction, "bleed_db": None if q.bleed is None else q.bleed.bleed_db},
@@ -260,10 +256,6 @@ def analyze(recording: Recording, *, trackers: Sequence[PitchTracker] | None = N
               "failed_trackers": p.failed_trackers, "octave_repaired_fraction": float(p.octave_repaired[voiced].mean())},
     )
     rep.meta["analysis_signal"] = "separated vocal" if sep_report.get("applied") else "input"
-    rep.meta["profile"] = Profile(cfg.profile).value  # revision C3: outputs carry the license profile
-    if recording.provenance is Provenance.USER and recording.owner_id:
-        # whose voice this is, without the id in clear (PIPA): rendering checks it against the consent token
-        rep.meta["owner_sha256"] = hashlib.sha256(recording.owner_id.encode()).hexdigest()
     if cfg.keep_separated_audio and sep_report.get("applied"):
         rep.meta["separated_audio"] = x
     warnings = [f"{k}: {v}" for k, v in q.flags.items()] + pr.warnings + sep_warnings

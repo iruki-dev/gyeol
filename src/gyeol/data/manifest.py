@@ -1,16 +1,16 @@
-"""Dataset manifests with license tags, and the license-gated loader.
+"""Dataset manifests and the dataset view.
 
 A manifest is a JSON file::
 
-    {"dataset": "vocalset",               # key in gyeol.core.license.REGISTRY
+    {"dataset": "vocalset",               # ideally a name from gyeol.core.assets (for provenance records)
      "root": "/data/vocalset",
      "items": [{"path": "f1/arpeggios/belt/f1_arpeggios_belt_a.wav",
                 "singer": "f1", "labels": {"technique": "belt"}}, ...]}
 
-:func:`open_manifest` resolves the dataset's :class:`LicensedAsset` and calls
-:func:`~gyeol.core.license.require_allowed` for the active profile *before*
-any item is exposed, so a commercial training run cannot touch
-non-commercial data.  Dataset-specific adapters (M2) produce manifests.
+:func:`open_manifest` returns a :class:`Dataset` view.  Which datasets may be
+used for what is up to the user; :func:`gyeol.core.assets.describe` gives the
+listed license of a dataset for the record.  Dataset-specific adapters (M2)
+produce manifests.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
-from ..core.license import LicensedAsset, Profile, lookup, require_allowed
+from ..core.assets import describe
 
 
 @dataclass
@@ -47,13 +47,12 @@ class Manifest:
         Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-class LicensedDataset:
-    """Iterable view of a manifest that has passed the license gate."""
+class Dataset:
+    """Iterable view of a manifest."""
 
-    def __init__(self, manifest: Manifest, asset: LicensedAsset, profile: Profile):
+    def __init__(self, manifest: Manifest):
         self.manifest = manifest
-        self.asset = asset
-        self.profile = profile
+        self.info = describe(manifest.dataset)  # listed license / source, for provenance records
 
     def __len__(self) -> int:
         return len(self.manifest.items)
@@ -65,9 +64,6 @@ class LicensedDataset:
         return Path(self.manifest.root) / item.path
 
 
-def open_manifest(manifest: Manifest | str | Path, profile: Profile | str) -> LicensedDataset:
-    """Open a manifest under ``profile``; raises LicenseError if not allowed."""
-    m = manifest if isinstance(manifest, Manifest) else Manifest.read(manifest)
-    asset = lookup(m.dataset)
-    require_allowed(asset, Profile(profile))
-    return LicensedDataset(m, asset, Profile(profile))
+def open_manifest(manifest: Manifest | str | Path) -> Dataset:
+    """A :class:`Dataset` over ``manifest`` (an object or a JSON path)."""
+    return Dataset(manifest if isinstance(manifest, Manifest) else Manifest.read(manifest))

@@ -12,10 +12,8 @@ mean of both frames' specific loudness, averaged over the frames the edit acts
 on.  It is **uncalibrated**: use it to rank items, not as a JND.  A listening
 test against it is part of the M8 evaluation.
 
-Rendering the user's voice needs a :class:`~gyeol.core.consent.ConsentedVoice`,
-so audibility is only computed for users who consented to voice synthesis;
-otherwise items keep ``audibility = None`` and the coach falls back to
-confidence × size over measurement uncertainty (:mod:`gyeol.coach.priority`).
+Items that are not scored keep ``audibility = None``; the coach then falls
+back to confidence × size over measurement uncertainty (:mod:`gyeol.coach.priority`).
 """
 
 from __future__ import annotations
@@ -24,7 +22,6 @@ from functools import lru_cache
 
 import numpy as np
 
-from ..core.consent import ConsentedVoice
 from ..core.containers import Explanation, Representation
 from ..core.status import Result
 
@@ -67,7 +64,7 @@ def perceptual_distance(ref: np.ndarray, test: np.ndarray, sr: int, hop: int = 5
     return float(np.mean(d))
 
 
-def score_audibility(exp: Explanation, voice: ConsentedVoice, take, target: Representation, renderer, *,
+def score_audibility(exp: Explanation, take, target: Representation, renderer, *,
                      feasible=None, seed: int = 0, context: int = 8) -> Result[Explanation]:
     """Fill ``item.audibility`` for every item the renderer can correct.
 
@@ -78,9 +75,9 @@ def score_audibility(exp: Explanation, voice: ConsentedVoice, take, target: Repr
     """
     from ..demo.edits import edit_for_item
     from ..demo.feasible import FeasibleRange, clamp_edit
-    from ..demo.renderers import check_take
+    from ..demo.renderers import _check
 
-    check_take(voice, take)
+    _check(take)
     try:
         rng = feasible or FeasibleRange.from_takes([take.rep])
     except ValueError as exc:
@@ -105,8 +102,8 @@ def score_audibility(exp: Explanation, voice: ConsentedVoice, take, target: Repr
         # render only the affected region (plus context) for the baseline and the edit
         idx = np.flatnonzero(support)
         a, b = max(0, idx[0] - context), min(len(support), idx[-1] + 1 + context)
-        base = renderer.render(voice, take, None, seed=seed, frames=(a, b))
-        r = renderer.render(voice, take, edit, seed=seed, frames=(a, b))
+        base = renderer.render(take, None, seed=seed, frames=(a, b))
+        r = renderer.render(take, edit, seed=seed, frames=(a, b))
         if not (base.ok and r.ok):
             it.audibility, it.detail["audibility_status"] = None, f"render failed: {base.reason or r.reason}"
             continue

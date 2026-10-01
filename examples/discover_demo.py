@@ -26,7 +26,7 @@ import numpy as np
 import torch
 
 from gyeol.attributes.extract import analyze
-from gyeol.core import Provenance, Recording
+from gyeol.core import Recording
 from gyeol.discover import (
     DirectionConfig,
     PromotionRegistry,
@@ -49,7 +49,7 @@ NOTES = [(262, "a", "s"), (294, "o", "t"), (330, "i", "k"), (349, "e", "h"), (39
 def render(oq: float, transpose: float, breathy: bool, seed: int):
     notes = [SynthNote(f, 0.3, gap_after=0.1, vowel=v, consonant=c) for f, v, c in NOTES]
     m = melody(notes, sr=44100, transpose_cents=transpose, seed=seed, open_quotient=oq, aspiration=0.35 if breathy else 0.02)
-    rep = analyze(Recording(m.audio, 44100, Provenance.SYNTHETIC), trackers=[PyinTracker(), YinTracker(), SHSTracker()]).unwrap()
+    rep = analyze(Recording(m.audio, 44100), trackers=[PyinTracker(), YinTracker(), SHSTracker()]).unwrap()
     L = LogMel(n_mels=24)(torch.tensor(m.audio, dtype=torch.float32)[None])[0].numpy()[: rep.grid.n_frames]
     f0 = np.where(rep.curves["f0_cents"].confidence > 0.5, rep.curves["f0_cents"].values, np.nan)
     return dict(F=L - L.mean(1, keepdims=True), f0=f0, loud=rep.curves["loudness"].values, notes=rep.meta["notes"],

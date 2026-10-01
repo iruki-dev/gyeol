@@ -1,7 +1,6 @@
 # CPU smoke preset (see heads.yaml): tiny autoencoder, vocoded + adversarial every 4th step.
 task: autoencoder
 seed: 0
-profile: commercial
 device: auto
 threads: 2
 data:

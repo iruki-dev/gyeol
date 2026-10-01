@@ -2,7 +2,6 @@
 # (prepare.resynthesize); DSP consensus is only a weak label on high-confidence frames of the original items.
 task: pitch
 seed: 0
-profile: commercial
 device: auto
 threads: 2
 data:

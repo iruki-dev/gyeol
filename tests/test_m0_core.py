@@ -1,33 +1,22 @@
-import io
-import warnings
+import hashlib
 
 import numpy as np
 import pytest
 
 from gyeol.core import (
+    ASSETS,
+    Asset,
     AttributeCurve,
     AttributeCurves,
-    ConsentedVoice,
-    ConsentError,
-    ConsentToken,
     FrameGrid,
     GridMismatchError,
-    LicenseError,
-    LicenseTag,
-    Profile,
-    Provenance,
-    Purpose,
-    Recording,
-    Representation,
     Result,
     ResultError,
-    SingerVector,
     Status,
-    lookup,
-    require_allowed,
-    require_consented_voice,
+    add_asset,
+    asset,
+    describe,
 )
-from gyeol.core.license import AssetKind, LicensedAsset
 
 
 # --- FrameGrid -------------------------------------------------------------
@@ -70,152 +59,92 @@ def test_result_status():
     assert u.usable and not u.ok and u.unwrap() == 3.0
 
 
-# --- licensing -------------------------------------------------------------
+# --- asset list ------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["gtsinger", "csd", "opencpop", "popbutfy", "openvpi_nsf_hifigan", "so_vits_svc", "pesto"])
-def test_commercial_profile_refuses_non_commercial(name):
-    with pytest.raises(LicenseError):
-        require_allowed(lookup(name), Profile.COMMERCIAL)
-
-
-def test_commercial_profile_allows_commercial_and_prints_aihub_conditions(capsys):
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        require_allowed(lookup("vocalset"), Profile.COMMERCIAL)
-        d = require_allowed(lookup("aihub_465_multi_singer"), Profile.COMMERCIAL)
-    err = capsys.readouterr().err
-    assert d.allowed
-    assert "never be redistributed" in err and "domestically" in err and "individually" in err
+def test_asset_list_documents_every_third_party_model_and_dataset():
+    for name in ["vocalset", "gtsinger", "csd", "opencpop", "popbutfy", "vocadito", "mir1k", "rmvpe", "hubert_fairseq",
+                 "bs_roformer_viperx_ep317", "openvpi_nsf_hifigan", "so_vits_svc", "pesto"]:
+        a = asset(name)
+        assert a.license and a.source and a.kind in ("dataset", "weights", "code")
+    assert asset("gtsinger").license == "CC-BY-NC-SA-4.0"
+    assert all(len(a.sha256) == 64 for a in ASSETS.values() if a.sha256)
+    with pytest.raises(KeyError, match="not in gyeol's asset list"):
+        asset("some_scraped_dataset")
 
 
-def test_unknown_license_refused_commercially_and_unregistered_assets_rejected():
-    with pytest.raises(LicenseError):
-        require_allowed(LicensedAsset("x", AssetKind.DATASET, LicenseTag.UNKNOWN, "?"), Profile.COMMERCIAL)
-    with pytest.raises(LicenseError, match="not in the license registry"):
-        lookup("some_scraped_dataset")
+def test_add_asset_and_describe(monkeypatch):
+    monkeypatch.setattr("gyeol.core.assets.ASSETS", dict(ASSETS))
+    from gyeol.core import assets
+
+    add_asset(Asset("my_ckpt", "weights", "proprietary", "in-house"))
+    with pytest.raises(ValueError, match="already listed"):
+        add_asset(Asset("my_ckpt", "weights", "x", "y"))
+    assert assets.describe("my_ckpt")["license"] == "proprietary"
+    assert describe("never_heard_of")["kind"] == "unlisted"
 
 
-def test_research_profile_allows_with_notices():
-    with pytest.warns(UserWarning, match="copyleft"):
-        assert require_allowed(lookup("pesto"), Profile.RESEARCH).allowed
-    assert not lookup("pesto").vendor_allowed
-
-
-def test_data_loader_license_gate(tmp_path):
-    from gyeol.data import Manifest, ManifestItem, open_manifest
-
-    m = Manifest("gtsinger", str(tmp_path), [ManifestItem("a.wav", "s1")])
-    with pytest.raises(LicenseError):
-        open_manifest(m, "commercial")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        ds = open_manifest(m, "research")
-        assert len(ds) == 1
-        path = tmp_path / "m.json"
-        Manifest("vocalset", str(tmp_path), [ManifestItem("b.wav", "f1", {"technique": "belt"})]).write(path)
-        ds2 = open_manifest(path, Profile.COMMERCIAL)
-    assert ds2.resolve(next(iter(ds2))) == tmp_path / "b.wav"
-
-
-def test_checkpoint_license_gate(tmp_path):
+def test_checkpoint_records_its_sources(tmp_path):
     import torch
 
-    from gyeol.train import load_checkpoint, most_restrictive, save_checkpoint
+    from gyeol.train import load_checkpoint, save_checkpoint
 
     sd = {"w": torch.zeros(2)}
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        save_checkpoint(tmp_path / "ok.pt", sd, name="ok", sources=["vocalset"], config={"lr": 1}, profile=Profile.COMMERCIAL)
-        state, info = load_checkpoint(tmp_path / "ok.pt", Profile.COMMERCIAL)
-        assert info.license is LicenseTag.COMMERCIAL_OK and torch.equal(state["w"], sd["w"])
-        # research checkpoint trained on NC data inherits the NC tag ...
-        save_checkpoint(tmp_path / "nc.pt", sd, name="nc", sources=["vocalset", "gtsinger"], config={}, profile=Profile.RESEARCH)
-        # ... and a commercial run refuses to load it
-        with pytest.raises(LicenseError):
-            load_checkpoint(tmp_path / "nc.pt", Profile.COMMERCIAL)
-        load_checkpoint(tmp_path / "nc.pt", Profile.RESEARCH)
-        # commercial training may not consume NC sources at all
-        with pytest.raises(LicenseError):
-            save_checkpoint(tmp_path / "x.pt", sd, name="x", sources=["csd"], config={}, profile=Profile.COMMERCIAL)
-        # a bare torch checkpoint without gyeol metadata is refused
-        torch.save(sd, tmp_path / "bare.pt")
-        with pytest.raises(LicenseError, match="no embedded license"):
-            load_checkpoint(tmp_path / "bare.pt", Profile.RESEARCH)
-    assert most_restrictive([LicenseTag.COMMERCIAL_OK, LicenseTag.COMMERCIAL_OK_CONDITIONAL]) is LicenseTag.COMMERCIAL_OK_CONDITIONAL
-    assert most_restrictive([LicenseTag.COMMERCIAL_OK, LicenseTag.NONCOMMERCIAL]) is LicenseTag.NONCOMMERCIAL
+    parent = save_checkpoint(tmp_path / "a.pt", sd, name="a", sources=["vocalset"], config={"lr": 1})
+    save_checkpoint(tmp_path / "b.pt", sd, name="b", sources=["vocalset", "gtsinger"], config={}, parents=[parent])
+    state, info = load_checkpoint(tmp_path / "b.pt")
+    assert torch.equal(state["w"], sd["w"])
+    assert info.source_names == ["vocalset", "gtsinger"]
+    assert {s["name"]: s["license"] for s in info.sources}["gtsinger"] == "CC-BY-NC-SA-4.0"
+    assert info.parents[0]["name"] == "a" and info.parents[0]["sources"][0]["name"] == "vocalset"
+    # a plain state dict loads too, with empty provenance
+    torch.save(sd, tmp_path / "bare.pt")
+    state, info = load_checkpoint(tmp_path / "bare.pt")
+    assert torch.equal(state["w"], sd["w"]) and info.sources == []
 
 
-def test_fetch_shows_license_and_requires_confirmation(capsys, monkeypatch):
+def _fake_download(payload: bytes):
+    def retrieve(url, dest):
+        open(dest, "wb").write(payload)
+
+    return retrieve
+
+
+def test_fetch_downloads_and_verifies_the_checksum(tmp_path, monkeypatch, capsys):
     import gyeol.cli as cli
+    from gyeol.core import assets
 
-    called = []
-    monkeypatch.setattr(cli.urllib.request, "urlretrieve", lambda *a: called.append(a))
-    monkeypatch.setitem(cli.REGISTRY, "tiny", LicensedAsset("tiny", AssetKind.CHECKPOINT, LicenseTag.COMMERCIAL_OK, "MIT", url="https://example.invalid/t.pt"))
-    monkeypatch.setattr(cli, "lookup", lambda n: cli.REGISTRY[n])
-    args = cli.argparse.Namespace(name="tiny", profile="commercial", yes=False)
-    assert cli._fetch(args, stdin=io.StringIO("no\n")) == 1
-    assert called == []
+    payload = b"weights"
+    monkeypatch.setattr(assets, "ASSETS", dict(ASSETS))
+    add_asset(Asset("tiny", "weights", "MIT", "test", url="https://example.invalid/t.pt", sha256=hashlib.sha256(payload).hexdigest()))
+    monkeypatch.setattr(cli.urllib.request, "urlretrieve", _fake_download(payload))
+    dest = tmp_path / "t.pt"
+    assert cli.main(["fetch", "tiny", "--dest", str(dest)]) == 0
+    assert dest.read_bytes() == payload
     out = capsys.readouterr().out
-    assert "MIT" in out and "commercial_ok" in out
-    assert cli.main(["fetch", "gtsinger"]) == 2  # refused under commercial profile, nothing downloaded
-    assert called == []
+    assert "MIT" in out and "sha256 verified" in out
+    assert cli.main(["fetch", "tiny", "--dest", str(dest)]) == 0 and "already present" in capsys.readouterr().out
+    # a corrupted download is deleted and reported
+    monkeypatch.setattr(cli.urllib.request, "urlretrieve", _fake_download(b"tampered"))
+    bad = tmp_path / "bad.pt"
+    assert cli.main(["fetch", "tiny", "--dest", str(bad)]) == 4
+    assert not bad.exists() and not (tmp_path / "bad.pt.part").exists()
+    # assets without a URL are obtained manually; unknown names are reported
+    assert cli.main(["fetch", "gtsinger"]) == 3
+    assert cli.main(["fetch", "nope"]) == 2
 
 
-# --- consent ---------------------------------------------------------------
+def test_licenses_command_lists_assets_and_the_responsibility_line(capsys):
+    from gyeol.cli import main
 
-def _user_voice(user="u1"):
-    rec = Recording(np.zeros(100), 44100, Provenance.USER, owner_id=user)
-    sv = SingerVector(np.ones(8), Provenance.USER, rec.recording_id, owner_id=user)
-    tok = ConsentToken(user, frozenset({Purpose.ANALYSIS, Purpose.VOICE_SYNTHESIS}))
-    return rec, sv, tok
-
-
-def test_consented_voice_happy_path():
-    rec, sv, tok = _user_voice()
-    v = ConsentedVoice.create(sv, rec, tok)
-    assert require_consented_voice(v) is v
-    with pytest.raises(AttributeError):
-        v.user_id = "other"
-
-
-def test_reference_vectors_can_never_be_rendered():
-    ref = Recording(np.zeros(100), 44100, Provenance.REFERENCE)
-    sv = SingerVector(np.ones(8), Provenance.REFERENCE, ref.recording_id)
-    tok = ConsentToken("u1", frozenset(Purpose))
-    with pytest.raises(ConsentError):
-        ConsentedVoice.create(sv, ref, tok)
-    with pytest.raises(TypeError):
-        ConsentedVoice(sv, "u1", "t", ref.recording_id)
-    with pytest.raises(ConsentError):
-        require_consented_voice(sv)
-
-
-@pytest.mark.parametrize("case", ["other_user", "no_purpose", "revoked", "wrong_recording"])
-def test_consent_violations(case):
-    rec, sv, tok = _user_voice()
-    if case == "other_user":
-        tok = ConsentToken("u2", frozenset({Purpose.VOICE_SYNTHESIS}))
-    elif case == "no_purpose":
-        tok = ConsentToken("u1", frozenset({Purpose.ANALYSIS}))
-    elif case == "revoked":
-        tok = ConsentToken("u1", frozenset({Purpose.VOICE_SYNTHESIS}), revoked=True)
-    elif case == "wrong_recording":
-        rec = Recording(np.zeros(100), 44100, Provenance.USER, owner_id="u1")
-    with pytest.raises(ConsentError):
-        ConsentedVoice.create(sv, rec, tok)
-
-
-def test_representation_rejects_provenance_mismatch():
-    g = FrameGrid(44100, 512, 3)
-    sv = SingerVector(np.ones(4), Provenance.REFERENCE, "r")
-    with pytest.raises(ValueError):
-        Representation(g, AttributeCurves(g), "r", Provenance.USER, singer=sv)
+    assert main(["licenses"]) == 0
+    out = capsys.readouterr().out
+    assert "gtsinger" in out and "CC-BY-NC-SA-4.0" in out and "responsible for complying" in out
 
 
 # --- store -----------------------------------------------------------------
 
 def test_consent_store_features_and_deletion(tmp_path):
-    from gyeol_service.store import ConsentStore, FeatureStore, delete_user
+    from gyeol_service.store import ConsentError, ConsentStore, FeatureStore, Purpose, delete_user
 
     cs = ConsentStore(tmp_path)
     fs = FeatureStore(tmp_path, cs)
@@ -239,7 +168,7 @@ def test_consent_store_features_and_deletion(tmp_path):
 
 
 def test_raw_audio_retention(tmp_path):
-    from gyeol_service.store import ConsentStore, RawAudioRetention, RawAudioStore, RetentionPolicy
+    from gyeol_service.store import ConsentStore, Purpose, RawAudioRetention, RawAudioStore, RetentionPolicy
 
     cs = ConsentStore(tmp_path)
     cs.grant("u1", {Purpose.STORAGE})
@@ -252,3 +181,15 @@ def test_raw_audio_retention(tmp_path):
     import time
 
     assert keep.sweep(now=time.time() + 2 * 86400) == 1
+
+
+def test_readme_lists_every_third_party_asset_with_its_license():
+    from pathlib import Path
+
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    section = readme[readme.index("## Licenses"):]
+    for a in ASSETS.values():
+        if a.name in ("gyeol_synthetic", "own_recordings"):
+            continue
+        assert f"`{a.name}`" in section and a.license in section, a.name
+    assert "responsible for complying with these licenses and with applicable law" in section

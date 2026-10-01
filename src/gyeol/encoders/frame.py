@@ -4,8 +4,8 @@
   layer outputs (torchaudio's ``extract_features`` convention); selected
   layers are averaged and projected onto the shared :class:`FrameGrid`.
   Builders load HuBERT / WavLM *architectures* from torchaudio and weights
-  from a **local** checkpoint the user fetched with ``gyeol fetch``, after
-  the license gate.  Nothing is downloaded here.
+  from a **local** checkpoint (e.g. one downloaded with ``gyeol fetch``).
+  Nothing is downloaded here.
 * :class:`DSPFrameFeatures` — a no-weights baseline made from the signal
   layer's curves (the v0.1-style baseline the learned heads must beat).
 """
@@ -20,7 +20,6 @@ import torch
 
 from ..core.containers import Representation
 from ..core.grid import FrameGrid, project
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 from ..dsp.base import resample
 
@@ -45,9 +44,7 @@ class TorchSSLEncoder:
     """
 
     def __init__(self, module: torch.nn.Module, dim: int, layers: Sequence[int], frame_rate: float = 50.0,
-                 name: str = "ssl", asset: str | None = None, profile: Profile = Profile.COMMERCIAL):
-        if asset is not None:
-            require_allowed(lookup(asset), profile, announce=False)
+                 name: str = "ssl", asset: str | None = None):
         self.module = module.eval()
         for p in self.module.parameters():
             p.requires_grad_(False)
@@ -71,17 +68,15 @@ def _torchaudio_builder(kind: str):
     return {"hubert_base": torchaudio.models.hubert_base, "wavlm_base": torchaudio.models.wavlm_base}[kind]
 
 
-def ssl_from_checkpoint(kind: str, checkpoint: str, asset: str, layers: Sequence[int], profile: Profile = Profile.COMMERCIAL) -> TorchSSLEncoder:
-    """Build a torchaudio HuBERT/WavLM base model and load a locally fetched state dict.
+def ssl_from_checkpoint(kind: str, checkpoint: str, layers: Sequence[int], asset: str | None = None) -> TorchSSLEncoder:
+    """Build a torchaudio HuBERT/WavLM base model and load a local state dict.
 
-    ``asset`` is the license-registry name of the weights (e.g.
-    ``"hubert_fairseq"``); loading is refused if the profile does not allow it.
+    ``asset`` optionally names the weights in :mod:`gyeol.core.assets` (e.g. ``"hubert_fairseq"``), for provenance records.
     """
-    require_allowed(lookup(asset), profile, announce=False)
     model = _torchaudio_builder(kind)()
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     model.load_state_dict(state.get("state_dict", state) if isinstance(state, dict) else state)
-    return TorchSSLEncoder(model, 768, layers, 50.0, kind, asset, profile)
+    return TorchSSLEncoder(model, 768, layers, 50.0, kind, asset)
 
 
 #: curves used by the DSP baseline encoder (masked values become 0, plus a validity flag each)

@@ -417,9 +417,8 @@ def _discriminators(m: dict) -> nn.ModuleList:
                           MultiScaleDiscriminator(int(m.get("scales", 3)), ch=ch)])
 
 
-def _save_samples(out_dir: Path, step: int, ids: list[str], wavs: list[np.ndarray], refs: list[np.ndarray], sr: int, task: str,
-                  profile: str) -> list[Path]:
-    """Audio samples with a JSON sidecar marking them as AI-generated reconstructions of the training data."""
+def _save_samples(out_dir: Path, step: int, ids: list[str], wavs: list[np.ndarray], refs: list[np.ndarray], sr: int, task: str) -> list[Path]:
+    """Reconstructions of validation audio next to their references, with a JSON sidecar saying what they are."""
     from ..io import save_audio
 
     d = out_dir / "samples" / f"step_{step:07d}"
@@ -431,8 +430,8 @@ def _save_samples(out_dir: Path, step: int, ids: list[str], wavs: list[np.ndarra
         save_audio(d / f"{i}_{iid}_reference.wav", np.clip(x, -1, 1), sr)
         paths.append(p)
     (d / "samples.json").write_text(json.dumps({
-        "ai_generated": True, "kind": f"{task} reconstruction of held-out validation audio (monitoring only, not for distribution)",
-        "step": step, "items": ids, "profile": profile}, indent=1), encoding="utf-8")
+        "kind": f"{task} reconstruction of held-out validation audio (training monitor)",
+        "step": step, "items": ids}, indent=1), encoding="utf-8")
     return paths
 
 
@@ -579,7 +578,7 @@ class AutoencoderTask(Task):
         y, x, _ = self._reconstruct(batch)
         n = int(self.cfg.run.n_samples)
         return _save_samples(out_dir, step, batch["ids"][:n], [v.cpu().numpy() for v in y[:n]], [v.cpu().numpy() for v in x[:n]],
-                             self.info.sr, self.name, self.cfg.profile)
+                             self.info.sr, self.name)
 
 
 # ---------------------------------------------------------------- vocoder
@@ -683,19 +682,18 @@ class VocoderTask(Task):
         y = self.vocoder(mel, ap, f0, rough, seed=0)
         n = int(self.cfg.run.n_samples)
         return _save_samples(out_dir, step, batch["ids"][:n], [v.cpu().numpy() for v in y[:n]], [v.cpu().numpy() for v in x[:n, : y.shape[1]]],
-                             self.info.sr, self.name, self.cfg.profile)
+                             self.info.sr, self.name)
 
 
-def vocoder_from_checkpoint(path, profile) -> tuple:
-    """(NSFVocoder, LogMel) rebuilt from a ``gyeol train vocoder`` release checkpoint (license-gated, eval mode)."""
+def vocoder_from_checkpoint(path) -> tuple:
+    """(NSFVocoder, LogMel, info) rebuilt from a ``gyeol train vocoder`` release checkpoint (eval mode)."""
     import torch as _torch
 
-    from ..core.license import Profile as _Profile
     from ..decoder.vocoder import NSFVocoder
     from ..encoders.mel import LogMel
     from .checkpoint import load_checkpoint
 
-    sd, info = load_checkpoint(path, _Profile(profile))
+    sd, info = load_checkpoint(path)
     meta = _torch.load(path, map_location="cpu", weights_only=True)["gyeol"]
     if meta.get("task") != "vocoder" or "data" not in meta:
         raise ValueError(f"{path} is not a vocoder checkpoint written by gyeol train (task {meta.get('task')!r})")
@@ -830,18 +828,17 @@ class PitchTask(Task):
         return out
 
     def finalize(self, cache, splits, out_dir):
-        """Evaluate the best weights on human-annotated real singing (``model.eval_sets``: manifests, license-gated)."""
+        """Evaluate the best weights on human-annotated real singing (``model.eval_sets``: manifests)."""
         sets = list(self.m.get("eval_sets", []))
         if not sets:
             return {}
-        from ..core.license import Profile as _Profile
         from ..eval.pitch_eval import evaluate_pitch
         from ..pitch.rmvpe import RMVPETracker
 
-        tracker = RMVPETracker(model=self.rmvpe.eval(), profile=_Profile(self.cfg.profile))
+        tracker = RMVPETracker(model=self.rmvpe.eval())
         report = {}
         for m in sets:
-            r = evaluate_pitch(m, tracker, _Profile(self.cfg.profile))
+            r = evaluate_pitch(m, tracker)
             report[str(m)] = r.value.summary() if r.ok else {"error": r.reason}
         (out_dir / "pitch_eval.json").write_text(json.dumps(report, indent=1, default=float), encoding="utf-8")
         return {"annotated_eval": report}

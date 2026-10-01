@@ -1,9 +1,7 @@
 """Human-annotated real-singing pitch sets for *evaluation* (revision D3): Vocadito and MIR-1K.
 
-Both adapters only build :class:`~gyeol.data.manifest.Manifest`\\ s; every read goes through
-:func:`~gyeol.data.manifest.open_manifest`, so the license gate for the active profile decides whether a set may be
-used.  The datasets must be registered in :mod:`gyeol.core.license` (``vocadito``, ``mir1k``) with their verified
-tags before :func:`gyeol.eval.pitch_eval.evaluate_pitch` will open them.
+Both adapters only build :class:`~gyeol.data.manifest.Manifest`\\ s (datasets ``vocadito`` and ``mir1k``; their
+listed licenses are in :mod:`gyeol.core.assets`).
 
 Layouts (as distributed):
 

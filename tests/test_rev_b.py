@@ -9,7 +9,6 @@ import pytest
 import torch
 import torch.nn as nn
 
-from gyeol.core.license import LicenseError, Profile
 
 ROOT = Path(__file__).parents[1]
 
@@ -317,7 +316,7 @@ def test_component_modes_and_lineage(cache, tmp_path):
     t._setup()
     voc = t.task.model.vocoder
     assert not any(p.requires_grad for p in voc.parameters()) and not voc.training
-    sd, _ = __import__("gyeol.train.checkpoint", fromlist=["x"]).load_checkpoint(base.best_checkpoint, Profile.COMMERCIAL)
+    sd, _ = __import__("gyeol.train.checkpoint", fromlist=["x"]).load_checkpoint(base.best_checkpoint)
     w = next(k for k in sd if k.startswith("model.acoustic.") and k.endswith("weight"))
     assert torch.equal(dict(t.task.model.named_parameters())[w[len("model."):]].detach(), sd[w])
     lrs = {g["name"]: g["lr"] for g in t.optimizers["g"].param_groups}
@@ -329,15 +328,19 @@ def test_component_modes_and_lineage(cache, tmp_path):
         Trainer(_cfg("vocoder", cache, tmp_path / "y", components={"pitch": "freeze"}), log=quiet)._setup()
 
 
-def test_initial_weights_pass_the_license_gate(cache, tmp_path):
+def test_initial_weights_are_recorded_in_the_lineage(cache, tmp_path):
     from gyeol.train.runner import Trainer
 
-    fake = tmp_path / "openvpi.ckpt"
-    torch.save({"generator": {}}, fake)
+    scratch = Trainer(_cfg("vocoder", cache, tmp_path / "s"), log=lambda s: None)
+    scratch._setup()
+    voc = scratch.task.component_modules()["vocoder"]
+    fake = tmp_path / "openvpi.ckpt"  # a third-party weight file (plain state dict) under a listed asset name
+    torch.save(voc.state_dict(), fake)
     cfg = _cfg("vocoder", cache, tmp_path / "nc", components={"vocoder": "finetune"},
                init={"vocoder": {"path": str(fake), "asset": "openvpi_nsf_hifigan"}})
-    with pytest.raises(LicenseError):
-        Trainer(cfg, log=lambda s: None)._setup()  # non-commercial weights under the commercial profile
+    t = Trainer(cfg, log=lambda s: None)
+    t._setup()  # loads directly from the local path; the license is information, not a gate
+    assert t.lineage.assets == ["gyeol_synthetic", "openvpi_nsf_hifigan"]  # training data, then the initial weights
     with pytest.raises(FileNotFoundError, match="gyeol fetch rmvpe"):
         Trainer(_cfg("pitch", cache, tmp_path / "rm", components={"pitch": "finetune"},
                      init={"pitch": {"path": str(tmp_path / "missing.pt"), "asset": "rmvpe"}}), log=lambda s: None)._setup()
@@ -367,15 +370,6 @@ def test_prepare_is_resumable_and_logs_failures(tmp_path):
         prepare([man], tmp_path / "c", config=PrepareConfig(sr=22050, hop=128, separation="off"))
 
 
-def test_prepare_respects_the_license_profile(tmp_path):
-    from gyeol.data.manifest import Manifest, ManifestItem
-    from gyeol.data.prepare import prepare
-
-    nc = Manifest("csd", str(tmp_path), [ManifestItem("a.wav", "s1", {})])
-    with pytest.raises(LicenseError):
-        prepare([nc], tmp_path / "c", Profile.COMMERCIAL)
-
-
 def test_prepare_cli(tmp_path, capsys):
     from gyeol.cli import main
 
@@ -393,8 +387,8 @@ def test_early_stopping_best_checkpoint_and_unseen_singer_report(cache, tmp_path
 
     r = train(_cfg("heads", cache, tmp_path / "es", optim__lr=0.0, run__max_steps=40, run__val_every=2, run__patience=2), log=lambda s: None)
     assert r.status == "early_stopped" and r.position.step == 6  # best at step 2, then two validations without improvement
-    _, info = load_checkpoint(r.best_checkpoint, Profile.COMMERCIAL)
-    assert info.license.value == "commercial_ok" and info.sources == ["gyeol_synthetic"]
+    _, info = load_checkpoint(r.best_checkpoint)
+    assert info.source_names == ["gyeol_synthetic"] and r.report["provenance"]["sources"] == ["gyeol_synthetic"]
     rep = r.report
     split = json.loads((tmp_path / "es" / "split.json").read_text())
     index = {x["id"]: x["singer"] for x in map(json.loads, (cache / "index.jsonl").read_text().splitlines())}
@@ -420,7 +414,7 @@ def test_logs_eta_and_samples(cache, tmp_path):
     vals = list(csv.DictReader(open(tmp_path / "v" / "val_log.csv")))
     assert [int(v["step"]) for v in vals] == [2, 4]
     side = json.loads(next((tmp_path / "v" / "samples").rglob("samples.json")).read_text())
-    assert side["ai_generated"] is True and side["profile"] == "commercial"
+    assert side["kind"].startswith("vocoder") and side["items"] and "ai_generated" not in side
     assert list((tmp_path / "v" / "samples").rglob("*_generated.wav"))
 
 

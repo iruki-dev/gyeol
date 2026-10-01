@@ -11,9 +11,9 @@ replace the storage with its own database while calling the same library functio
 """
 
 from .session import Attempt, CoachConfig, CoachSession, Feedback, FeedbackEntry, SelfAssessmentPrompt, SessionSummary, coach_strings
-from .store import ConsentStore, FeatureStore, RawAudioRetention, RawAudioStore, RetentionPolicy, delete_user
+from .store import ConsentError, ConsentStore, ConsentToken, Purpose, FeatureStore, RawAudioRetention, RawAudioStore, RetentionPolicy, delete_user
 from .wellbeing import FatigueMonitor, PhonationLog
 
-__all__ = ["Attempt", "CoachConfig", "CoachSession", "ConsentStore", "FatigueMonitor", "FeatureStore", "Feedback", "FeedbackEntry",
+__all__ = ["Attempt", "CoachConfig", "CoachSession", "ConsentError", "ConsentStore", "ConsentToken", "Purpose", "FatigueMonitor", "FeatureStore", "Feedback", "FeedbackEntry",
            "PhonationLog", "RawAudioRetention", "RawAudioStore", "RetentionPolicy", "SelfAssessmentPrompt", "SessionSummary",
            "coach_strings", "delete_user"]

@@ -2,7 +2,6 @@
 # Synthetic data (no recordings, no people) is generated and prepared into the shared cache on first use.
 task: heads
 seed: 0
-profile: commercial
 device: auto
 threads: 2
 data:

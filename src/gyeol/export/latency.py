@@ -99,14 +99,13 @@ def profile_onnx(path: str, make_feeds: Callable[[float], dict], durations_s: Se
 def pipeline_profile(audio: np.ndarray, sr: int, target=None, trackers=None, n_runs: int = 3) -> dict[str, float]:
     """Median seconds per analysis stage (+ explanation) for one recording."""
     from ..attributes.extract import analyze
-    from ..core.consent import Provenance
     from ..core.containers import Recording
     from ..explain import explain
 
     stages: dict[str, list[float]] = {}
     for _ in range(n_runs):
         t0 = time.perf_counter()
-        rep = analyze(Recording(np.asarray(audio, float), sr, Provenance.SYNTHETIC), trackers=trackers)
+        rep = analyze(Recording(np.asarray(audio, float), sr), trackers=trackers)
         total = time.perf_counter() - t0
         if not rep.usable:
             raise ValueError(f"analysis failed: {rep.reason}")

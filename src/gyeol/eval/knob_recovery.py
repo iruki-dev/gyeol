@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..core.consent import Provenance
 from ..core.containers import Recording
 from ..synth import SynthNote, melody
 from ..verification.degrade import add_noise
@@ -85,7 +84,7 @@ def knob_recovery(n_takes: int = 8, seed: int = 0, snr_db: float = 25.0, dur: fl
     target_m = melody(_notes((0,) * n, (0,) * n, tvib, dur, gap), sr=sr)
     target_audio = target_m.audio
     data = KnobData()
-    an = lambda x, prov: analyze(Recording(x, sr, prov, owner_id="knob" if prov is Provenance.USER else None), trackers=trackers)  # noqa: E731
+    an = lambda x: analyze(Recording(x, sr), trackers=trackers)  # noqa: E731
     for i in range(n_takes):
         detune = rng.uniform(-max_detune, max_detune, n)
         shifts = rng.uniform(-max_shift_s, max_shift_s, n)
@@ -97,13 +96,13 @@ def knob_recovery(n_takes: int = 8, seed: int = 0, snr_db: float = 25.0, dur: fl
         user = user_m.audio
         m = max(len(user), len(target_audio))
         t_pad, u_pad = np.pad(target_audio, (0, m - len(target_audio))), np.pad(user, (0, m - len(user)))
-        target = an(t_pad, Provenance.REFERENCE)
+        target = an(t_pad)
         if not target.usable:
             continue
         per_cond, contour_truth = [], {}
         t_true = _true_cents(target_m.truth["f0_track"], sr, target.value.grid.times())
         for x in (u_pad, add_noise(u_pad, snr_db, "pink", seed=i)):
-            rep = an(x, Provenance.USER)
+            rep = an(x)
             ex = explain([rep.value], target.value) if rep.usable else None
             items = {it.key: it for it in ex.value.items} if ex is not None and ex.usable else {}
             per_cond.append(items)

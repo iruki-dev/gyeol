@@ -9,21 +9,29 @@ from typing import Any, Iterator, Mapping
 
 import numpy as np
 
-from .consent import Provenance, SingerVector
 from .grid import FrameGrid, GridMismatchError
-from .license import LicensedAsset
+
+
+@dataclass(frozen=True, eq=False)
+class SingerVector:
+    """Utterance-level singer embedding and the recording it was derived from."""
+
+    vector: np.ndarray
+    source_recording_id: str
+
+    def __post_init__(self) -> None:
+        v = np.asarray(self.vector, dtype=np.float32)
+        v.setflags(write=False)
+        object.__setattr__(self, "vector", v)
 
 
 @dataclass
 class Recording:
-    """Mono audio plus who it belongs to and under which license."""
+    """Mono audio with an id (and free-form metadata)."""
 
     audio: np.ndarray
     sr: int
-    provenance: Provenance = Provenance.UNKNOWN
-    owner_id: str | None = None
     recording_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    license: LicensedAsset | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -31,8 +39,6 @@ class Recording:
         if a.ndim != 1:
             raise ValueError(f"Recording expects mono audio, got shape {a.shape}")
         self.audio = a
-        if self.provenance is Provenance.USER and not self.owner_id:
-            raise ValueError("a USER recording needs owner_id")
 
     @property
     def duration(self) -> float:
@@ -117,7 +123,6 @@ class Representation:
     grid: FrameGrid
     curves: AttributeCurves
     recording_id: str
-    provenance: Provenance
     events: list[Event] = field(default_factory=list)
     singer: SingerVector | None = None  # M4
     env: np.ndarray | None = None  # M4
@@ -129,8 +134,6 @@ class Representation:
         self.grid.require_same(self.curves.grid)
         if self.residual is not None:
             self.grid.check_array(self.residual, "residual")
-        if self.singer is not None and self.singer.provenance is not self.provenance:
-            raise ValueError("singer vector provenance must match the representation's provenance")
 
 
 class Consistency(str, Enum):

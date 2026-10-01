@@ -1,8 +1,7 @@
 """Pitch evaluation on human-annotated real singing (revision D3).
 
 Synthetic exact-f0 data trains the pitch model; *real* singing with human f0 annotations (Vocadito, MIR-1K —
-:mod:`gyeol.data.pitch_sets`) measures it.  The manifest passes the license gate for the given profile before
-any file is read.  Metrics follow the usual melody-extraction definitions (mir_eval style, 50-cent tolerance):
+:mod:`gyeol.data.pitch_sets`) measures it.  Metrics follow the usual melody-extraction definitions (mir_eval style, 50-cent tolerance):
 raw pitch accuracy (RPA), raw chroma accuracy (RCA), voicing recall and voicing false alarm, and overall accuracy.
 """
 
@@ -13,7 +12,6 @@ from pathlib import Path
 
 import numpy as np
 
-from ..core.license import Profile
 from ..core.status import Result
 from ..data.manifest import Manifest, open_manifest
 from ..data.pitch_sets import load_item_audio, read_reference_f0
@@ -65,10 +63,10 @@ class PitchEvalReport:
                 "rpa_frame_weighted": float(np.sum([x.rpa for x in s] * w) / max(w.sum(), 1)), "failures": self.failures}
 
 
-def evaluate_pitch(manifest: Manifest | str | Path, tracker, profile: Profile | str = Profile.COMMERCIAL, limit: int | None = None
+def evaluate_pitch(manifest: Manifest | str | Path, tracker, limit: int | None = None
                    ) -> Result[PitchEvalReport]:
     """Run ``tracker`` (any :class:`~gyeol.pitch.base.PitchTracker`) on every annotated item of ``manifest``."""
-    ds = open_manifest(manifest, Profile(profile))  # license gate before any file is read
+    ds = open_manifest(manifest)
     rep = PitchEvalReport(ds.manifest.dataset, getattr(tracker, "name", type(tracker).__name__))
     for i, item in enumerate(ds):
         if limit is not None and i >= limit:

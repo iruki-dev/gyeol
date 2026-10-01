@@ -1,9 +1,10 @@
 """Command-line interface.
 
-    gyeol licenses                 list registered assets and their tags
-    gyeol fetch <name> [--yes]     show the license, ask, then download
+    gyeol licenses                 list the third-party models and datasets gyeol knows, with their licenses
+    gyeol fetch <name>             download a listed asset and verify its SHA-256
     gyeol profile [wav]            per-stage latency of the analysis pipeline
     gyeol eval realset <folder>    evaluate on user-supplied real recordings (manifest.jsonl)
+    gyeol eval pitch <manifest>    pitch accuracy on a human-annotated set
     gyeol prepare --manifest m.json --out cache     separation, pitch, curves, features (resumable)
     gyeol train <task> --config run.yaml [--resume] heads | autoencoder | vocoder | pitch | ssl
 """
@@ -17,52 +18,56 @@ import urllib.request
 from pathlib import Path
 
 from . import __version__
-from .core.license import REGISTRY, Profile, decide, lookup
+from .core.assets import ASSETS, asset
 
 CACHE = Path.home() / ".cache" / "gyeol"
 
 
 def _licenses(args: argparse.Namespace) -> int:
-    prof = Profile(args.profile)
-    for a in REGISTRY.values():
-        d = decide(a, prof)
-        mark = "allowed" if d.allowed else "REFUSED"
-        ver = "" if a.verified else " (unverified)"
-        print(f"{a.name:26s} {a.kind.value:10s} {a.tag.value:26s} {a.license:18s} {mark}{ver}")
+    for a in ASSETS.values():
+        pin = " sha256 pinned" if a.sha256 else ""
+        print(f"{a.name:26s} {a.kind:8s} {a.license:40s} {a.source}{pin}")
+    print("\nYou are responsible for complying with these licenses and with applicable law.")
     return 0
 
 
-def _fetch(args: argparse.Namespace, stdin=None) -> int:
-    asset = lookup(args.name)
-    prof = Profile(args.profile)
-    d = decide(asset, prof)
-    print(f"asset:    {asset.name} ({asset.kind.value})")
-    print(f"license:  {asset.license}  [{asset.tag.value}]{'' if asset.verified else '  (tag not re-verified upstream)'}")
-    print(f"source:   {asset.source or '-'}")
-    for line in list(asset.conditions) + list(asset.caveats):
-        print(f"note:     {line}")
-    if not d.allowed:
-        print(f"refused:  {d.reason}", file=sys.stderr)
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 22), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _fetch(args: argparse.Namespace) -> int:
+    try:
+        a = asset(args.name)
+    except KeyError as exc:
+        print(exc.args[0], file=sys.stderr)
         return 2
-    if asset.url is None:
-        print("This asset has no registered download URL; obtain it manually from the source above and place it in", CACHE / asset.name)
+    print(f"asset:    {a.name} ({a.kind})")
+    print(f"license:  {a.license}")
+    print(f"source:   {a.source}")
+    for line in a.notes:
+        print(f"note:     {line}")
+    if a.url is None:
+        print(f"no download URL is listed; obtain it from the source above and place it in {CACHE / a.name}")
         return 3
-    if not args.yes:
-        stream = stdin or sys.stdin
-        print(f"Download {asset.url} to {CACHE / asset.name}? Type 'yes' to accept the license: ", end="", flush=True)
-        if stream.readline().strip().lower() != "yes":
-            print("aborted")
-            return 1
-    dest = CACHE / asset.name / Path(asset.url).name
+    dest = Path(args.dest) if args.dest else CACHE / a.name / Path(a.url).name
+    if dest.exists() and a.sha256 and _sha256(dest) == a.sha256:
+        print(f"already present and verified: {dest}")
+        return 0
     dest.parent.mkdir(parents=True, exist_ok=True)
-    urllib.request.urlretrieve(asset.url, dest)  # noqa: S310 - explicit, user-confirmed download
-    if asset.sha256:
-        digest = hashlib.sha256(dest.read_bytes()).hexdigest()
-        if digest != asset.sha256:
-            dest.unlink()
-            print(f"checksum mismatch for {dest}", file=sys.stderr)
+    tmp = dest.with_name(dest.name + ".part")
+    urllib.request.urlretrieve(a.url, tmp)  # noqa: S310 - explicit download requested on the command line
+    if a.sha256:
+        digest = _sha256(tmp)
+        if digest != a.sha256:
+            tmp.unlink()
+            print(f"checksum mismatch for {a.url}: got {digest}, expected {a.sha256}; nothing saved", file=sys.stderr)
             return 4
-    print(f"saved {dest}")
+    tmp.replace(dest)
+    print(f"saved {dest}" + (" (sha256 verified)" if a.sha256 else " (no checksum listed)"))
     return 0
 
 
@@ -85,10 +90,9 @@ def _profile(args: argparse.Namespace) -> int:
     target = None
     if args.explain:
         from .attributes.extract import analyze
-        from .core.consent import Provenance
         from .core.containers import Recording
 
-        target = analyze(Recording(x, sr, Provenance.SYNTHETIC), trackers=trackers).unwrap()
+        target = analyze(Recording(x, sr), trackers=trackers).unwrap()
     prof = pipeline_profile(x, sr, target, trackers, n_runs=args.runs)
     dur = prof.pop("audio_seconds")
     print(f"audio {dur:.2f} s; environment {environment()}")
@@ -133,27 +137,27 @@ def _eval_realset(args: argparse.Namespace) -> int:
 
 
 def _eval_pitch(args: argparse.Namespace) -> int:
-    """Pitch accuracy on a human-annotated set (revision D3); the manifest passes the license gate first."""
+    """Pitch accuracy on a human-annotated set (revision D3)."""
     from .eval.pitch_eval import evaluate_pitch
 
     if args.checkpoint:
         from .pitch.rmvpe import RMVPE, RMVPETracker
         from .train.checkpoint import load_checkpoint
 
-        sd, _ = load_checkpoint(args.checkpoint, Profile(args.profile))
+        sd, _ = load_checkpoint(args.checkpoint)
         model = RMVPE()
         model.load_state_dict({k[len("pitch."):]: v for k, v in sd.items() if k.startswith("pitch.")})
-        trackers = [RMVPETracker(model=model, profile=Profile(args.profile))]
+        trackers = [RMVPETracker(model=model)]
     elif args.rmvpe_weights:
         from .pitch.rmvpe import RMVPETracker
 
-        trackers = [RMVPETracker(args.rmvpe_weights, profile=Profile(args.profile))]
+        trackers = [RMVPETracker(args.rmvpe_weights)]
     else:
         from .pitch.adapters import PyinTracker, SHSTracker, YinTracker
 
         trackers = [PyinTracker(), YinTracker(), SHSTracker()]
     for tr in trackers:
-        r = evaluate_pitch(args.manifest, tr, Profile(args.profile), limit=args.limit)
+        r = evaluate_pitch(args.manifest, tr, limit=args.limit)
         if not r.ok:
             print(f"{tr.name}: {r.reason}", file=sys.stderr)
             continue
@@ -178,13 +182,13 @@ def _prepare(args: argparse.Namespace) -> int:
         return 2
     ssl = None
     if "ssl" in cfg.features:
-        if not (args.ssl_checkpoint and args.ssl_asset):
-            print("--features ssl needs --ssl-checkpoint and --ssl-asset (a fetched, registered checkpoint)", file=sys.stderr)
+        if not args.ssl_checkpoint:
+            print("--features ssl needs --ssl-checkpoint (local HuBERT / WavLM weights)", file=sys.stderr)
             return 2
         from .encoders.frame import ssl_from_checkpoint
 
-        ssl = ssl_from_checkpoint(args.ssl_arch, args.ssl_checkpoint, args.ssl_asset, args.ssl_layers, Profile(args.profile))
-    rep = prepare(manifests, args.out, Profile(args.profile), cfg, ssl_encoder=ssl, limit=args.limit,
+        ssl = ssl_from_checkpoint(args.ssl_arch, args.ssl_checkpoint, args.ssl_layers, args.ssl_asset)
+    rep = prepare(manifests, args.out, cfg, ssl_encoder=ssl, limit=args.limit,
                   progress=(lambda s: print(f"  {s}", file=sys.stderr)) if args.verbose else None)
     print(rep.summary())
     for f in rep.failures[:20]:
@@ -215,13 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gyeol", description="gyeol v2 — interpretable singing-voice model")
     p.add_argument("--version", action="version", version=f"gyeol {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
-    lic = sub.add_parser("licenses", help="list registered assets and license decisions")
-    lic.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
+    lic = sub.add_parser("licenses", help="list third-party models and datasets with their licenses")
     lic.set_defaults(fn=_licenses)
-    f = sub.add_parser("fetch", help="show a license, ask for confirmation, then download")
+    f = sub.add_parser("fetch", help="download a listed asset and verify its SHA-256")
     f.add_argument("name")
-    f.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
-    f.add_argument("--yes", action="store_true", help="accept the shown license non-interactively")
+    f.add_argument("--dest", help="file to write (default: ~/.cache/gyeol/<name>/<file>)")
     f.set_defaults(fn=_fetch)
     pr = sub.add_parser("profile", help="per-stage latency of the analysis pipeline on this machine")
     pr.add_argument("wav", nargs="?", help="audio file (default: a synthetic melody)")
@@ -244,23 +246,21 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--per-tracker", action="store_true", help="also report each pitch tracker alone on the raw input")
     rs.add_argument("--verbose", action="store_true")
     rs.set_defaults(fn=_eval_realset)
-    ep = evs.add_parser("pitch", help="pitch accuracy on a human-annotated set (Vocadito, MIR-1K manifests; license-gated)")
+    ep = evs.add_parser("pitch", help="pitch accuracy on a human-annotated set (Vocadito, MIR-1K manifests)")
     ep.add_argument("manifest")
     ep.add_argument("--checkpoint", help="a `gyeol train pitch` checkpoint (full-size RMVPE)")
     ep.add_argument("--rmvpe-weights", help="fetched reference RMVPE weights")
-    ep.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
     ep.add_argument("--limit", type=int)
     ep.set_defaults(fn=_eval_pitch)
     pp = sub.add_parser("prepare", help="prepare training data: separation, pitch, curves, features (resumable)")
     pp.add_argument("--manifest", action="append", help="gyeol manifest JSON (repeatable)")
     pp.add_argument("--out", required=True, help="cache folder")
-    pp.add_argument("--profile", default="commercial", choices=[x.value for x in Profile])
     pp.add_argument("--sr", type=int, default=44100)
     pp.add_argument("--hop", type=int, default=512)
     pp.add_argument("--separation", default="auto", choices=["auto", "always", "off"])
     pp.add_argument("--features", nargs="+", default=["dsp"], choices=["dsp", "ssl"])
     pp.add_argument("--ssl-checkpoint")
-    pp.add_argument("--ssl-asset", help="registry name of the SSL weights (license gate), e.g. hubert_fairseq")
+    pp.add_argument("--ssl-asset", help="name of the SSL weights in the asset list (recorded as provenance), e.g. hubert_fairseq")
     pp.add_argument("--ssl-arch", default="hubert_base", choices=["hubert_base", "wavlm_base"])
     pp.add_argument("--ssl-layers", type=int, nargs="+", default=[3, 4, 5])
     pp.add_argument("--neural-trackers", action="store_true", help="use the default tracker set (neural trackers need fetched weights)")

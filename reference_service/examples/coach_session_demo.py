@@ -20,7 +20,7 @@ import numpy as np
 
 from gyeol import api
 from gyeol.coach import ThresholdSet, VoiceRange, attempt_metrics, note_centres, voiced_seconds
-from gyeol_service import CoachConfig, CoachSession, ConsentStore, coach_strings
+from gyeol_service import CoachConfig, CoachSession, ConsentStore, Purpose, coach_strings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,14 +51,14 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("give --synthetic or --target and --user")
 
     owner = "demo-user"
-    # the service records the user's consent; the library only checks the token it is given
-    ConsentStore(args.out / "consent").grant(owner, {api.Purpose.ANALYSIS})
+    # consent is application policy: here the reference service records it
+    ConsentStore(args.out / "consent").grant(owner, {Purpose.ANALYSIS})
     guide, gsr = api.load_audio(target_path)
-    target = api.analyze(guide, gsr, role="reference", lyrics=lyrics or None, dsp_only=True).unwrap()
+    target = api.analyze(guide, gsr, lyrics=lyrics or None, dsp_only=True).unwrap()
     takes = []
     for p in user_paths:
         x, sr = api.load_audio(p)
-        r = api.analyze(x, sr, owner_id=owner, reference=(guide, gsr), dsp_only=True)
+        r = api.analyze(x, sr, reference=(guide, gsr), dsp_only=True)
         if r.usable:
             takes.append(r.value)
     if not takes:

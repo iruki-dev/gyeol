@@ -31,7 +31,7 @@ from gyeol.coach import (
 )
 from gyeol.coach.health import load_norms
 from gyeol_service import CoachConfig, CoachSession, FatigueMonitor, PhonationLog  # revision C1: session state is in the service
-from gyeol.core import Consistency, Explanation, ExplanationItem, FrameGrid, Provenance, Span
+from gyeol.core import Consistency, Explanation, ExplanationItem, FrameGrid, Span
 
 GRID = FrameGrid(44100, 512, 400)
 
@@ -395,8 +395,8 @@ def test_phonation_time_and_fatigue():
 def test_attempt_metrics_from_a_representation():
     from .helpers import make_melody, rep_of
 
-    clean = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15).audio, Provenance.USER).unwrap())
-    breathy = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15, aspiration=0.4).audio, Provenance.USER).unwrap())
+    clean = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15).audio).unwrap())
+    breathy = attempt_metrics(rep_of(make_melody(dur=0.4, gap=0.15, aspiration=0.4).audio).unwrap())
     assert np.isfinite([clean.instability_cents, clean.top_cents, clean.breath_db]).all()
     assert breathy.breath_db > clean.breath_db + 3
     assert clean.top_cents == pytest.approx(1200 * np.log2(392 / 440), abs=30)  # highest note G4
@@ -412,8 +412,8 @@ def test_coach_on_a_real_explanation():
     from .helpers import make_melody, pad_to, rep_of
 
     t, u = pad_to(make_melody().audio, make_melody(detune=(0, -45, 0, 0, 0, 0), shifts=(0, 0, 0, 0.09, 0, 0), seed=2).audio)
-    target = rep_of(t, Provenance.REFERENCE).unwrap()
-    exp = explain([rep_of(u, Provenance.USER).unwrap()], target).unwrap()
+    target = rep_of(t).unwrap()
+    exp = explain([rep_of(u).unwrap()], target).unwrap()
     notes = note_centres(target)
     s = CoachSession(thresholds(), voice_range=VR, target_notes_cents=notes)
     fb = s.new_attempt(exp).reveal()

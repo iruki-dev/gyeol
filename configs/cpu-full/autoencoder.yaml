@@ -3,7 +3,6 @@
 # Interrupt with Ctrl-C at any time and continue with --resume.
 task: autoencoder
 seed: 0
-profile: commercial
 device: auto
 threads: 0
 data:

@@ -4,7 +4,6 @@ Example (``configs/cpu-smoke/autoencoder.yaml``)::
 
     task: autoencoder
     seed: 0
-    profile: commercial
     device: auto          # auto → CUDA if available, else CPU (float32)
     threads: 0            # 0 = PyTorch default
     data:
@@ -85,7 +84,6 @@ class RunConfig:
 class TrainConfig:
     task: str
     seed: int = 0
-    profile: str = "commercial"
     device: str = "auto"
     threads: int = 0
     mixed_precision: bool = False  # CUDA only; CPU always float32

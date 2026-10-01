@@ -5,8 +5,8 @@ The first target is **VocalCoachBench** (arXiv:2609.04241): 515 recordings,
 7-label issue taxonomy under 3 parents — Technical Production (Breath,
 Vocalization, Technique), Musical Accuracy (Pitch, Rhythm) and Delivery
 (Diction, Expression).  Its audio keeps each source corpus's license (DAMP
-under the Smule Research Data License; several CC BY-NC-SA sources), so it is
-registered ``noncommercial`` and loads under the **research profile only**.
+under the Smule Research Data License; several CC BY-NC-SA sources; see
+:mod:`gyeol.core.assets`).
 
 The release's exact JSON layout is not given in the paper, so the loader uses
 a :class:`BenchmarkFieldMap` (dotted paths, like the AI Hub adapter): check it
@@ -40,7 +40,6 @@ from typing import Any
 import numpy as np
 
 from ..core.containers import Explanation
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 
 LABELS = ("breath", "vocalization", "technique", "pitch", "rhythm", "diction", "expression")
@@ -118,10 +117,8 @@ class LoadReport:
     skipped: dict[str, str]  # clip id (or index) → reason
 
 
-def load_expert_benchmark(index_json: str | Path, profile: Profile = Profile.RESEARCH, asset: str = "vocalcoachbench",
-                          field_map: BenchmarkFieldMap | None = None) -> Result[LoadReport]:
-    """Load a locally downloaded benchmark index (license-gated: refused under the commercial profile)."""
-    require_allowed(lookup(asset), profile)
+def load_expert_benchmark(index_json: str | Path, field_map: BenchmarkFieldMap | None = None) -> Result[LoadReport]:
+    """Load a locally downloaded benchmark index."""
     fm = field_map or BenchmarkFieldMap()
     path = Path(index_json)
     try:

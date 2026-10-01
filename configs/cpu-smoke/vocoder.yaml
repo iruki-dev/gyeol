@@ -1,7 +1,6 @@
 # CPU smoke preset (see heads.yaml): tiny NSF vocoder on band aperiodicity + mel + f0.
 task: vocoder
 seed: 0
-profile: commercial
 device: auto
 threads: 2
 data:

@@ -16,7 +16,7 @@ so a ZFTurbo-style YAML ``model:`` section can be passed as is.
 
 :class:`RoFormerSeparator` runs long inputs in overlapping chunks with
 cross-faded overlap-add and returns the vocal stem.  gyeol ships **no weights**:
-``gyeol fetch bs_roformer_viperx_ep317`` shows the license and asks first.
+``gyeol fetch bs_roformer_viperx_ep317`` downloads them and verifies the pinned SHA-256.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..core.license import Profile, lookup, require_allowed
+from ..core.assets import ASSETS
 from ..core.status import Result
 from ..dsp.base import resample, to_mono
 
@@ -228,34 +228,39 @@ def file_sha256(path: str | Path, chunk: int = 1 << 22) -> str:
     return h.hexdigest()
 
 
+def pinned_sha256(asset: str) -> str | None:
+    """The SHA-256 listed for ``asset`` in :mod:`gyeol.core.assets` (None if unlisted or not pinned)."""
+    a = ASSETS.get(asset)
+    return a.sha256 if a is not None else None
+
+
 class RoFormerSeparator:
     """Vocal stem from a BS-RoFormer, in cross-faded overlapping chunks (the separator protocol: ``separate(audio, sr)``)."""
 
     def __init__(self, model: BSRoFormer, sr: int = VIPERX_SR, chunk: int = VIPERX_CHUNK, overlap: float = 0.25, asset: str = "bs_roformer_viperx_ep317",
-                 profile: Profile = Profile.COMMERCIAL, name: str = "bs-roformer", device: str = "cpu"):
-        require_allowed(lookup(asset), profile, announce=False)
+                 name: str = "bs-roformer", device: str = "cpu"):
         self.model, self.sr, self.chunk, self.overlap, self.asset, self.name, self.device = model.eval(), sr, chunk, overlap, asset, name, device
         self.weights_sha256: str | None = None
         self.model.to(device)
 
     @classmethod
     def from_checkpoint(cls, path: str | Path, config: dict | None = None, *, asset: str = "bs_roformer_viperx_ep317",
-                        profile: Profile = Profile.COMMERCIAL, **kw) -> "RoFormerSeparator":
-        require_allowed(lookup(asset), profile, announce=False)  # gate before reading the weights
+                        **kw) -> "RoFormerSeparator":
+        """Load local weights; if ``asset`` has a pinned SHA-256 in :mod:`gyeol.core.assets`, the file must match it."""
         if not Path(path).is_file():
-            raise FileNotFoundError(f"no separator weights at {path}; fetch them with `gyeol fetch {asset}` (shows the license first)")
+            raise FileNotFoundError(f"no separator weights at {path}; download them with `gyeol fetch {asset}`")
         digest = file_sha256(path)
-        pinned = lookup(asset).sha256
+        pinned = pinned_sha256(asset)
         if pinned and digest != pinned:
             raise ValueError(f"checksum mismatch for {path}: sha256 {digest} is not the pinned {pinned} of {asset!r}; refusing to load")
         model = BSRoFormer(**(config or VIPERX_EP317))
         model.load_reference_weights(path)
-        sep = cls(model, asset=asset, profile=profile, **kw)
+        sep = cls(model, asset=asset, **kw)
         sep.weights_sha256 = digest
         return sep
 
     @classmethod
-    def from_cache(cls, asset: str = "bs_roformer_viperx_ep317", profile: Profile = Profile.COMMERCIAL, **kw) -> Result["RoFormerSeparator"]:
+    def from_cache(cls, asset: str = "bs_roformer_viperx_ep317", **kw) -> Result["RoFormerSeparator"]:
         """The fetched weights of ``asset`` in gyeol's cache, if present (never downloads)."""
         from ..cli import CACHE
 
@@ -263,7 +268,7 @@ class RoFormerSeparator:
         if not files:
             return Result.unavailable(f"no fetched weights for {asset!r} in {CACHE / asset} (run `gyeol fetch {asset}`)")
         try:
-            return Result.success(cls.from_checkpoint(files[0], asset=asset, profile=profile, **kw))
+            return Result.success(cls.from_checkpoint(files[0], asset=asset, **kw))
         except (ValueError, RuntimeError) as exc:
             return Result.failure(f"cannot load {files[0]}: {exc}")
 

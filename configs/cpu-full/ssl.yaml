@@ -2,7 +2,6 @@
 # (measured ~8 s/step on 4 CPU threads → 60k steps ≈ 5.5 days).
 task: ssl
 seed: 0
-profile: commercial
 device: auto
 threads: 0
 data:

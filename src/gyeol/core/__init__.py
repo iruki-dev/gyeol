@@ -1,6 +1,6 @@
-"""Core types: frame grid, status, licensing, consent and containers."""
+"""Core types: frame grid, status, the third-party asset list and containers."""
 
-from .consent import ConsentedVoice, ConsentError, ConsentToken, Provenance, Purpose, SingerVector, require_consented_voice
+from .assets import ASSETS, Asset, add_asset, asset, describe
 from .containers import (
     AttributeCurve,
     AttributeCurves,
@@ -9,19 +9,17 @@ from .containers import (
     Explanation,
     ExplanationItem,
     Premise,
-    WithheldItem,
     Recording,
     Representation,
+    SingerVector,
     Span,
+    WithheldItem,
 )
 from .grid import DEFAULT_HOP, DEFAULT_SR, FrameGrid, GridMismatchError
-from .license import REGISTRY, AssetKind, LicensedAsset, LicenseError, LicenseTag, Profile, decide, lookup, require_allowed
 from .status import Result, ResultError, Status
 
 __all__ = [
-    "AssetKind", "AttributeCurve", "AttributeCurves", "ConsentError", "ConsentToken", "ConsentedVoice", "Consistency",
-    "DEFAULT_HOP", "DEFAULT_SR", "Event", "Explanation", "ExplanationItem", "Premise", "WithheldItem", "FrameGrid", "GridMismatchError",
-    "LicenseError", "LicenseTag", "LicensedAsset", "Profile", "Provenance", "Purpose", "REGISTRY", "Recording",
-    "Representation", "Result", "ResultError", "SingerVector", "Span", "Status", "decide", "lookup",
-    "require_allowed", "require_consented_voice",
+    "ASSETS", "Asset", "AttributeCurve", "AttributeCurves", "Consistency", "DEFAULT_HOP", "DEFAULT_SR", "Event", "Explanation",
+    "ExplanationItem", "FrameGrid", "GridMismatchError", "Premise", "Recording", "Representation", "Result", "ResultError",
+    "SingerVector", "Span", "Status", "WithheldItem", "add_asset", "asset", "describe",
 ]

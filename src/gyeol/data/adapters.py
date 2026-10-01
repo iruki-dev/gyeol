@@ -1,9 +1,9 @@
-"""Dataset adapters: local dataset trees → license-tagged :class:`Manifest` objects.
+"""Dataset adapters: local dataset trees → :class:`Manifest` objects.
 
 Adapters never download anything.  Each one scans a directory the user has
-obtained themselves and emits a manifest whose ``dataset`` names the
-license-registry entry, so :func:`~gyeol.data.manifest.open_manifest`
-enforces the profile when the data is used.
+obtained themselves and emits a manifest whose ``dataset`` is the dataset's
+name in :mod:`gyeol.core.assets` (its listed license is recorded with
+anything built from it).
 
 Label vocabularies are mapped onto gyeol's attribute names
 (:data:`PHONATION_LABELS`).  Where a dataset's on-disk schema could not be
@@ -16,13 +16,10 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from ..core.consent import Purpose
-from ..core.license import lookup
 from ..core.status import Result, Status
 from .manifest import Manifest, ManifestItem
 
@@ -44,11 +41,6 @@ class ScanReport:
 
 def _audio_files(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.suffix.lower() in AUDIO_EXT)
-
-
-def _announce_conditions(dataset: str) -> None:
-    for c in lookup(dataset).conditions:
-        print(f"[gyeol license] {dataset}: {c}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -166,13 +158,11 @@ def inspect_json_keys(root: str | Path, limit: int = 20) -> dict[str, int]:
 def scan_aihub(root: str | Path, dataset: str, field_map: AIHubFieldMap | None = None) -> Result[ScanReport]:
     """AI Hub singing datasets: audio files with a same-stem ``.json`` label file anywhere under ``root``.
 
-    ``dataset`` is ``"aihub_465_multi_singer"`` or ``"aihub_473_guide_vocal"``.
-    Prints the AI Hub usage conditions (no redistribution, domestic
-    processing, individual download).
+    ``dataset`` is ``"aihub_465_multi_singer"`` or ``"aihub_473_guide_vocal"``
+    (AI Hub's usage terms are listed in :mod:`gyeol.core.assets`).
     """
     if dataset not in ("aihub_465_multi_singer", "aihub_473_guide_vocal"):
         return Result.failure(f"unknown AI Hub dataset {dataset!r}")
-    _announce_conditions(dataset)
     root = Path(root)
     if not root.is_dir():
         return Result.failure(f"{root} is not a directory")
@@ -206,7 +196,7 @@ def scan_aihub(root: str | Path, dataset: str, field_map: AIHubFieldMap | None =
 
 
 # ---------------------------------------------------------------------------
-# GTSinger (research profile only: CC BY-NC-SA)
+# GTSinger (CC BY-NC-SA)
 # ---------------------------------------------------------------------------
 
 GTSINGER_TECHNIQUES = {
@@ -216,7 +206,7 @@ GTSINGER_TECHNIQUES = {
 
 
 def scan_gtsinger(root: str | Path, technique_map: dict[str, str | None] | None = None) -> Result[ScanReport]:
-    """GTSinger-style paired technique data (research profile only).
+    """GTSinger-style paired technique data.
 
     Expects ``.../<singer>/<technique>/<song>/<Group>/<file>.wav`` where
     ``<Group>`` is ``Control_Group`` (technique off) or ``<Technique>_Group``
@@ -250,18 +240,15 @@ def scan_gtsinger(root: str | Path, technique_map: dict[str, str | None] | None 
 
 
 # ---------------------------------------------------------------------------
-# Own recordings (consent-gated)
+# Own recordings
 # ---------------------------------------------------------------------------
 
 
-def scan_own(root: str | Path, consent_allows: Callable[[str, Purpose], bool], purpose: Purpose = Purpose.TRAINING,
-             dataset: str = "own_recordings") -> Result[ScanReport]:
+def scan_own(root: str | Path, include: Callable[[str], bool] | None = None, dataset: str = "own_recordings") -> Result[ScanReport]:
     """In-house recordings described by ``<root>/recordings.json``.
 
     Each entry: ``{"path": ..., "user_id": ..., "labels": {...}, "pair_id"?: ..., "pair_role"?: ...}``.
-    Only recordings whose owner currently consents to ``purpose`` are
-    included (``consent_allows`` is usually ``ConsentStore(root).allows``).
-    ``dataset`` must be registered in the license registry by the operator.
+    ``include(user_id)`` (optional) lets the application choose which users' recordings are used.
     """
     root = Path(root)
     desc = root / "recordings.json"
@@ -274,8 +261,8 @@ def scan_own(root: str | Path, consent_allows: Callable[[str, Purpose], bool], p
         if not uid:
             skipped.append((e.get("path", "?"), "no user_id"))
             continue
-        if not consent_allows(uid, purpose):
-            skipped.append((e.get("path", "?"), f"user has not consented to {Purpose(purpose).value}"))
+        if include is not None and not include(uid):
+            skipped.append((e.get("path", "?"), "excluded by the include filter"))
             continue
         meta = {k: e[k] for k in ("pair_id", "pair_role", "session", "device") if k in e}
         items.append(ManifestItem(e["path"], uid, dict(e.get("labels", {})), meta))

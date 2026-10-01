@@ -3,7 +3,6 @@
 # A vocoder needs far more steps than a CPU gives in a week: fine-tune (init) rather than train from scratch when you can.
 task: vocoder
 seed: 0
-profile: commercial
 device: auto
 threads: 0
 data:

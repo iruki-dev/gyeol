@@ -1,17 +1,15 @@
-"""Model cards with licenses and data provenance (M8).
+"""Model cards with data provenance (M8).
 
-A card is built from a gyeol checkpoint's embedded metadata, so the license
-lineage cannot be typed in by hand: the effective tag, every source asset
-(with its registry entry: license, conditions, caveats, whether the tag was
-re-verified upstream), the profile it was trained under and the config hash.
-Evaluation results are attached as named tables with a ``synthetic`` flag;
-:meth:`ModelCard.validate` refuses cards that
+A card is built from a gyeol checkpoint's embedded metadata, so its provenance is not typed in by hand: every
+dataset and weight file it was built from (with the license and source listed in :mod:`gyeol.core.assets`), the
+gyeol checkpoints it was initialised from and the config hash.  Evaluation results are attached as named tables
+with a ``synthetic`` flag; :meth:`ModelCard.validate` reports cards that
 
-* claim the commercial profile with a non-commercial source,
-* have no evaluation, or only synthetic evaluation, without saying so in the
-  limitations,
-* are missing the out-of-scope uses that gyeol requires (no target-singer
-  synthesis, no medical diagnosis, no singer identification).
+* have no evaluation, or only synthetic evaluation, without saying so in the limitations,
+* are missing the standard out-of-scope uses (voice imitation without permission, medical diagnosis, singer
+  identification).
+
+The licenses are recorded as information; complying with them is up to whoever uses the model.
 """
 
 from __future__ import annotations
@@ -22,19 +20,16 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..core.license import LicenseTag, Profile, lookup
 
 REQUIRED_OUT_OF_SCOPE = (
-    "Synthesising any voice other than the consenting user's own (there is no target-singer synthesis path).",
+    "Synthesising or imitating a person's voice without their permission.",
     "Medical diagnosis of voice disorders; the coach shows a referral notice instead.",
-    "Identifying or verifying singers (voice features are sensitive biometric data under PIPA).",
+    "Identifying or verifying singers (voice features are biometric data in many jurisdictions).",
 )
 
 DEFAULT_ETHICS = (
-    "Voice-derived features (singer vectors, embeddings) are sensitive biometric information under PIPA: stored only with "
-    "per-purpose consent, deletable by user id, raw audio deleted after feature extraction by default.",
-    "Every generated waveform is labelled AI-generated (metadata + sidecar) and passes a watermark hook (Korean AI Basic Act).",
-    "Rendering requires a ConsentedVoice built from the user's own recording and consent token.",
+    "Voice-derived features (singer vectors, embeddings) can be biometric data; how they are stored and deleted is "
+    "decided by the application that uses the model.",
     "Coaching text never labels users (e.g. 'tone-deaf'); register and phonation feedback is phrased tentatively.",
 )
 
@@ -53,11 +48,9 @@ class ModelCard:
     component: str
     architecture: str
     parameters: int
-    license: str  # effective tag
-    profile: str
     config_hash: str
-    sources: list[dict]  # registry entries of every training source
-    conditions: list[str]
+    sources: list[dict]  # describe(name) of every dataset / weight file it was built from
+    parents: list[dict]  # gyeol checkpoints it was initialised from
     intended_use: list[str]
     out_of_scope: list[str]
     evaluation: list[EvalTable]
@@ -67,10 +60,6 @@ class ModelCard:
 
     def validate(self) -> list[str]:
         problems = []
-        if self.profile == Profile.COMMERCIAL.value:
-            bad = [s["name"] for s in self.sources if s["tag"] not in (LicenseTag.COMMERCIAL_OK.value, LicenseTag.COMMERCIAL_OK_CONDITIONAL.value)]
-            if bad:
-                problems.append(f"commercial profile but non-commercial sources: {bad}")
         for req in REQUIRED_OUT_OF_SCOPE:
             if req not in self.out_of_scope:
                 problems.append(f"missing out-of-scope statement: {req!r}")
@@ -78,9 +67,6 @@ class ModelCard:
             problems.append("no evaluation results")
         elif all(t.synthetic for t in self.evaluation) and not any("synthetic" in lim.lower() for lim in self.limitations):
             problems.append("all evaluation is synthetic but the limitations do not say so")
-        unverified = [s["name"] for s in self.sources if not s.get("verified")]
-        if unverified and not any("verif" in lim.lower() for lim in self.limitations):
-            problems.append(f"license tags not re-verified upstream for {unverified}; say so in the limitations")
         return problems
 
     def to_dict(self) -> dict:
@@ -94,15 +80,15 @@ class ModelCard:
     def to_markdown(self) -> str:
         L = [f"# Model card — {self.name}", "",
              f"*Component:* {self.component}  ", f"*Architecture:* {self.architecture}  ", f"*Parameters:* {self.parameters:,}  ",
-             f"*Created:* {self.created_utc}", "", "## License and provenance", "",
-             f"- **Effective license tag:** `{self.license}` (most restrictive of all sources)",
-             f"- **Training profile:** `{self.profile}`", f"- **Config hash:** `{self.config_hash}`", "",
-             "| Source | Kind | Tag | License | Re-verified | Conditions / caveats |", "|---|---|---|---|---|---|"]
+             f"*Created:* {self.created_utc}", "", "## Provenance", "",
+             f"- **Config hash:** `{self.config_hash}`", "",
+             "Built from (licenses as listed upstream; complying with them is up to the user of this model):", "",
+             "| Source | Kind | License | Notes |", "|---|---|---|---|"]
         for s in self.sources:
-            notes = "; ".join(list(s.get("conditions", [])) + list(s.get("caveats", []))) or "—"
-            L.append(f"| {s['name']} | {s['kind']} | `{s['tag']}` | {s['license']} | {'yes' if s.get('verified') else 'no'} | {notes} |")
-        if self.conditions:
-            L += ["", "Conditions that travel with this model:", ""] + [f"- {c}" for c in self.conditions]
+            notes = "; ".join(s.get("notes", [])) or "—"
+            L.append(f"| {s['name']} | {s.get('kind', '')} | {s.get('license', '')} | {notes} |")
+        if self.parents:
+            L += ["", "Initialised from:", ""] + [f"- {p['name']}" for p in self.parents]
         L += ["", "## Intended use", ""] + [f"- {u}" for u in self.intended_use]
         L += ["", "## Out of scope", ""] + [f"- {u}" for u in self.out_of_scope]
         L += ["", "## Evaluation", ""]
@@ -120,20 +106,13 @@ class ModelCard:
         return "\n".join(L) + "\n"
 
 
-def _source_entry(name: str) -> dict:
-    a = lookup(name)
-    return {"name": a.name, "kind": a.kind.value, "tag": a.tag.value, "license": a.license, "source": a.source,
-            "conditions": list(a.conditions), "caveats": list(a.caveats), "verified": bool(a.verified)}
-
-
 def card_from_checkpoint(path: str | Path, *, component: str, architecture: str, intended_use: list[str],
-                         evaluation: list[EvalTable], limitations: list[str], profile: Profile = Profile.RESEARCH,
-                         extra_out_of_scope: list[str] | None = None) -> ModelCard:
-    """Build a card from a gyeol checkpoint (license gate applies to ``profile``)."""
+                         evaluation: list[EvalTable], limitations: list[str], extra_out_of_scope: list[str] | None = None) -> ModelCard:
+    """Build a card from a gyeol checkpoint's provenance."""
     from ..train.checkpoint import load_checkpoint
 
-    state, info = load_checkpoint(path, profile)
+    state, info = load_checkpoint(path)
     n_params = int(sum(v.numel() for k, v in state.items() if hasattr(v, "numel") and not k.endswith("num_batches_tracked")))
-    return ModelCard(info.name, component, architecture, n_params, info.license.value, info.profile.value, info.config_hash,
-                     [_source_entry(s) for s in info.sources], list(info.conditions), list(intended_use),
+    return ModelCard(info.name, component, architecture, n_params, info.config_hash,
+                     [dict(s) for s in info.sources], list(info.parents), list(intended_use),
                      list(REQUIRED_OUT_OF_SCOPE) + list(extra_out_of_scope or []), list(evaluation), list(limitations))

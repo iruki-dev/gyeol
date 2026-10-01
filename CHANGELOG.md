@@ -5,6 +5,25 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### Revision E — licensing and consent handling (see `docs/revisions/E.md`)
+- Breaking:
+  - The license gate is replaced by a plain asset list, `gyeol.core.assets` (name, license, source, URL,
+    sha256).
+  - `Profile`, `LicenseTag`, `require_allowed` and every `profile=` parameter are removed; assets load directly
+    from local paths.
+  - `gyeol fetch` downloads and verifies the SHA-256 (no prompt); `gyeol licenses` lists the assets.
+- Checkpoints and model cards record the datasets and weights they were built from (`describe()`), as
+  information.
+- Breaking:
+  - `ConsentToken`, `ConsentedVoice`, `Provenance`, `Purpose`, `OwnVoice`, the AI-label metadata
+    (`demo.label`) and the watermark module are removed.
+  - Renderers take a `demo.Take(recording, rep)` and return plain audio.
+  - `api.render_demo(audio, sr, rep, explanation, target, …)`; `api.compare(audibility=(audio, sr))`.
+- Schemas: `gyeol.representation` v2 and `gyeol.demo` v2 drop provenance and AI-label fields; v1 is still read.
+- README: a "Licenses" section; consent and labelling are documented as application policy (the reference
+  service keeps its own consent store).
+- Supersedes revision D's personal-only and copyleft opt-in items.
+
 ### Revision D — follow-up decisions (see `docs/revisions/D.md`)
 - D1:
   - Target songs are separated once with BS-RoFormer, in the background, and cached by content hash

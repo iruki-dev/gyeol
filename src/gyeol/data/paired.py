@@ -6,7 +6,7 @@ supervises attribute heads (M3) and conditional directions (M7).
 
 For each (off, on) pair the loader
 
-1. loads both files through the license-gated dataset,
+1. loads both files through the dataset view,
 2. analyses them with the signal layer (f0, loudness, content, …),
 3. aligns *on* to *off* with the content-only warp; separate performances
    are not sing-along takes, so the band is widened to cover their length
@@ -23,11 +23,10 @@ from typing import Callable, Iterator
 import numpy as np
 
 from ..align.warp import Warp, WarpConfig, estimate_warp
-from ..core.consent import Provenance
 from ..core.containers import Recording, Representation
 from ..core.status import Result
 from ..io.audio import load_audio
-from .manifest import LicensedDataset, ManifestItem
+from .manifest import Dataset, ManifestItem
 from .splits import pairs
 
 
@@ -43,7 +42,7 @@ class PairedExample:
 
 
 class PairedLoader:
-    def __init__(self, dataset: LicensedDataset, analyzer: Callable[[Recording], Result[Representation]] | None = None,
+    def __init__(self, dataset: Dataset, analyzer: Callable[[Recording], Result[Representation]] | None = None,
                  min_band_seconds: float = 1.0):
         from ..attributes.extract import analyze
 
@@ -60,7 +59,7 @@ class PairedLoader:
             x, sr = load_audio(self.dataset.resolve(item))
         except Exception as exc:  # noqa: BLE001
             return Result.failure(f"cannot read {item.path}: {exc}")
-        rec = Recording(x, sr, Provenance.REFERENCE, meta={"dataset": self.dataset.asset.name, "path": item.path})
+        rec = Recording(x, sr, meta={"dataset": self.dataset.manifest.dataset, "path": item.path})
         return self.analyzer(rec)
 
     def load(self, index: int) -> Result[PairedExample]:

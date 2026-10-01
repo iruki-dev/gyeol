@@ -9,7 +9,7 @@ One loop for every task:
 * **device** — ``auto`` → CUDA if available, else CPU in float32, with a
   configurable thread count (:mod:`gyeol.train.device`);
 * **components** — ``freeze | finetune | scratch`` per component, initial
-  weights from local checkpoints through the license gate, optional
+  weights from local checkpoints, optional
   gradient checkpointing (:mod:`gyeol.train.components`);
 * **memory** — gradient accumulation over ``optim.grad_accum`` batches;
 * **interrupt / resume** — the full training state (modules, optimizers,
@@ -19,7 +19,7 @@ One loop for every task:
 * **validation** — every ``run.val_every`` steps on the singer-disjoint
   validation split, early stopping after ``run.patience`` validations
   without improvement, the best weights kept as a release checkpoint
-  (license lineage embedded);
+  (sources and parents recorded);
 * **progress** — ETA on stdout, ``train_log.csv`` and ``val_log.csv``, audio
   samples for generative tasks;
 * **report** — each run ends with ``report.json`` / ``report.md``: the best
@@ -41,7 +41,6 @@ from typing import Callable
 import numpy as np
 import torch
 
-from ..core.license import Profile, lookup
 from .components import Lineage, apply_mode, enable_gradient_checkpointing, keep_frozen_in_eval, load_initial_weights, param_groups
 from .config import TrainConfig
 from .device import resolve_device
@@ -76,7 +75,7 @@ def prepare_data(cfg: TrainConfig, progress: Callable[[str], None] | None = None
         s = dict(cfg.data.synthetic)
         manifests.append(synthetic_manifest(cache / "synthetic_src", sr=pcfg.sr, **s))
     if manifests:
-        rep = prepare(manifests, cache, Profile(cfg.profile), pcfg)
+        rep = prepare(manifests, cache, pcfg)
         if progress:
             progress(f"[gyeol prepare] {rep.summary()}")
     if not (cache / "index.jsonl").exists():
@@ -147,10 +146,6 @@ class Trainer:
             rows = [r for r in rows if r["dataset"] in cfg.data.datasets]
         if cfg.task != "pitch":  # exact-f0 resynthesised copies are pitch training data only (revision D3)
             rows = [r for r in rows if not (r.get("meta") or {}).get("resynth")]
-        for ds in sorted({r["dataset"] for r in rows}):
-            from ..core.license import require_allowed
-
-            require_allowed(lookup(ds), Profile(cfg.profile), announce=False)  # the cache may hold data of another profile
         split_file = self.out / "split.json"
         if split_file.exists():
             ids = json.loads(split_file.read_text(encoding="utf-8"))
@@ -181,7 +176,7 @@ class Trainer:
         for name, spec in self.plan.init.items():
             if self.plan.mode(name) == "scratch":
                 continue
-            load_initial_weights(comps[name], spec, Profile(cfg.profile), self.lineage,
+            load_initial_weights(comps[name], spec, self.lineage,
                                  loader=lambda m, sd, n=name: self.task.load_init(n, m, sd))
         for name, m in comps.items():
             apply_mode(m, self.plan.mode(name))
@@ -260,7 +255,7 @@ class Trainer:
 
         path = self.out / f"{name}.pt"
         save_checkpoint(path, self.task.release_state(), name=f"{self.cfg.task}-{name}", sources=self.lineage.assets,
-                        config=self.cfg.as_dict(), profile=Profile(self.cfg.profile), parents=self.lineage.parents,
+                        config=self.cfg.as_dict(), parents=self.lineage.parents,
                         extra={"task": self.cfg.task, "step": self.position.step, "components": dict(self.plan.modes),
                                "model": dict(self.cfg.model), "data": {"sr": self.info.sr, "hop": self.info.hop, "n_ap": self.info.n_ap}})
         return path
@@ -390,7 +385,7 @@ class Trainer:
 
         best = self.out / "best.pt"
         if best.exists():
-            sd, _ = load_checkpoint(best, Profile(self.cfg.profile))
+            sd, _ = load_checkpoint(best)
             for name, m in self.task.state_modules().items():
                 prefix = f"{name}."
                 m.load_state_dict({k[len(prefix):]: v for k, v in sd.items() if k.startswith(prefix)}, strict=False)
@@ -407,8 +402,8 @@ class Trainer:
             "best_step": p.best_step, "best_validation_score": p.best_metric,
             "test_singers": sorted({r.get("singer") for r in self.splits.get("test", [])} - {None, ""}),
             "validation_singers": sorted({r.get("singer") for r in self.splits.get("val", [])} - {None, ""}),
-            "test": test_metrics, "finalize": final, "device": self.spec.describe(), "profile": self.cfg.profile,
-            "license_lineage": {"datasets": self.lineage.assets, "parents": [x.name for x in self.lineage.parents]},
+            "test": test_metrics, "finalize": final, "device": self.spec.describe(),
+            "provenance": {"sources": self.lineage.assets, "parents": [x.name for x in self.lineage.parents]},
             "components": {n: self.plan.mode(n) for n in self.task.components},
         }
         atomic_write_text(json.dumps(report, indent=1, default=float), self.out / "report.json")

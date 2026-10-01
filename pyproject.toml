@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gyeol"
 version = "2.0.0.dev0"
-description = "Interpretable singing-voice model for Korean vocal coaching: attribute curves, time-warp explanations and consent-gated own-voice demos"
+description = "Interpretable singing-voice model for Korean vocal coaching: attribute curves, time-warp explanations and stepwise practice demos"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "iruki-dev" }]

@@ -268,7 +268,6 @@ def evaluate_realset(rs: RealSet, *, split: str = "all", held_out_fraction: floa
                      trackers=None, rhythm_verdict_ms: float = 50.0, on_time_tolerance_ms: float = 30.0,
                      analyze_fn: Callable | None = None, explain_config=None, progress: Callable[[str], None] | None = None) -> RealsetReport:
     from ..attributes.extract import analyze
-    from ..core.consent import Provenance
     from ..core.containers import Recording
     from ..explain import explain
     from ..io import load_audio
@@ -278,7 +277,7 @@ def evaluate_realset(rs: RealSet, *, split: str = "all", held_out_fraction: floa
     sides = split_realset(rs, held_out_fraction, seed) if split != "all" else {u.id: "all" for u in rs.users}
     users = [u for u in rs.users if split == "all" or sides[u.id] == split]
 
-    def run(item: RealItem, provenance):
+    def run(item: RealItem):
         x, sr = load_audio(item.audio)
         backing = None
         if item.recording.get("backing"):
@@ -286,7 +285,7 @@ def evaluate_realset(rs: RealSet, *, split: str = "all", held_out_fraction: floa
             from ..dsp.base import resample
 
             backing = resample(b, bsr, sr)
-        rec = Recording(x, sr, provenance, owner_id=item.singer or "realset" if provenance is Provenance.USER else None)
+        rec = Recording(x, sr)
         if analyze_fn is not None:
             return analyze_fn(rec, backing=backing, separation=separation)
         return analyze(rec, trackers=trackers, backing=backing, separation=separation)
@@ -300,9 +299,9 @@ def evaluate_realset(rs: RealSet, *, split: str = "all", held_out_fraction: floa
         if progress:
             progress(u.id)
         if u.target not in target_cache:
-            target_cache[u.target] = run(rs.items[u.target], Provenance.REFERENCE)
+            target_cache[u.target] = run(rs.items[u.target])
         tr = target_cache[u.target]
-        ur = run(u, Provenance.USER)
+        ur = run(u)
         if not (tr.usable and ur.usable):
             cr.failed += 1
             failures.append(f"{u.id}: analysis failed ({tr.reason or ur.reason})")

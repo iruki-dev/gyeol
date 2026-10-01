@@ -2,7 +2,6 @@
 # cpu-full/ssl.yaml fine-tunes HuBERT/WavLM base from a fetched checkpoint instead.
 task: ssl
 seed: 0
-profile: commercial
 device: auto
 threads: 2
 data:

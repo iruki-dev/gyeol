@@ -26,7 +26,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 from ..dsp.base import resample
 from .base import PitchTrack
@@ -257,22 +256,21 @@ class RMVPE(nn.Module):
 class RMVPETracker:
     """:class:`~gyeol.pitch.base.PitchTracker` around :class:`RMVPE`.
 
-    ``weights_path`` must point at weights the user fetched (``gyeol fetch
-    rmvpe`` shows the license first).  ``model=`` injects an already built
-    network (tests use tiny random ones).
+    ``weights_path`` points at local RMVPE weights (``gyeol fetch rmvpe``
+    shows where to get them).  ``model=`` injects an already built network
+    (tests use tiny random ones).
     """
 
     name = "rmvpe"
     asset = "rmvpe"
 
-    def __init__(self, weights_path: str | Path | None = None, profile: Profile = Profile.COMMERCIAL, model: RMVPE | None = None,
+    def __init__(self, weights_path: str | Path | None = None, model: RMVPE | None = None,
                  threshold: float = THRESHOLD, max_chunk_s: float = 30.0):
-        require_allowed(lookup(self.asset), profile, announce=False)
         if model is None:
             if weights_path is None:
                 raise ValueError("RMVPETracker needs weights_path (fetched with `gyeol fetch rmvpe`) or a model")
             if not Path(weights_path).is_file():
-                raise FileNotFoundError(f"no RMVPE weights at {weights_path}; fetch them with `gyeol fetch rmvpe` (shows the license first)")
+                raise FileNotFoundError(f"no RMVPE weights at {weights_path}; see `gyeol fetch rmvpe` for where to get them")
             model = RMVPE()
             model.load_reference_weights(weights_path)
         self.model = model.eval()

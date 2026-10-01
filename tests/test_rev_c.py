@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 
 from gyeol import api
-from gyeol.core.license import LicenseError, Profile, decide, lookup
 
 from .helpers import SR, make_melody
 
@@ -28,9 +27,12 @@ def test_library_has_no_user_state_modules():
 
     for name in ("CoachSession", "CoachConfig", "Attempt", "Feedback", "PhonationLog", "FatigueMonitor", "ConsentStore"):
         assert not hasattr(coach, name)
-    # stateless parts stay: consent types and guards, thresholds, priority, health measures, onboarding scoring
+    # stateless parts stay: thresholds, priority, health measures, onboarding scoring
     from gyeol.coach import attempt_metrics, check_phrase, fatigue_flags, phonation_warnings, rank, score_onboarding  # noqa: F401
-    from gyeol.core import ConsentedVoice, require_consented_voice  # noqa: F401
+    # consent, AI labelling and license policy belong to the application (revision E)
+    for mod in ("gyeol.core.consent", "gyeol.core.license", "gyeol.demo.label", "gyeol.demo.watermark"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(mod)
 
 
 def test_library_never_imports_the_service():
@@ -78,26 +80,23 @@ def test_reference_service_package_is_separate():
 def analysed():
     target = make_melody(seed=1, vib=(0, 0, 50, 0, 0, 0))
     take = make_melody(detune=(0, 0, 40, 0, 0, 0), shifts=(0, 0, 0, 0.07, 0, 0), seed=2)
-    t = api.analyze(target.audio, SR, role="reference", lyrics="사랑해요 그대", dsp_only=True).unwrap()
-    u = api.analyze(take.audio, SR, owner_id="u1", reference=(target.audio, SR), dsp_only=True).unwrap()
+    t = api.analyze(target.audio, SR, lyrics="사랑해요 그대", dsp_only=True).unwrap()
+    u = api.analyze(take.audio, SR, reference=(target.audio, SR), dsp_only=True).unwrap()
     return target, take, t, u
 
 
 def test_api_surface():
-    for name in ("analyze", "compare", "render_demo", "train", "to_json", "from_json", "json_schema", "OwnVoice"):
+    for name in ("analyze", "compare", "render_demo", "train", "to_json", "from_json", "json_schema", "take"):
         assert name in api.__all__ and callable(getattr(api, name)) or isinstance(getattr(api, name), type)
 
 
 def test_api_analyze_and_compare(analysed):
     _, _, t, u = analysed
     assert u.meta["latency"]["confidence"] > 0.5 and t.meta["syllables"]
-    assert u.meta["profile"] == "commercial"
     e = api.compare(u, t).unwrap()
     it = next(i for i in e.items if i.attribute == "intonation_offset" and i.detail["target_note"] == 2)
     assert it.magnitude == pytest.approx(40, abs=10) and it.spans[0].syllables == ("해",)
-    with pytest.raises(ValueError, match="owner_id"):
-        api.analyze(np.zeros(SR), SR)
-    bad = api.analyze(np.zeros(SR // 50), SR, role="synthetic", dsp_only=True)
+    bad = api.analyze(np.zeros(SR // 50), SR, dsp_only=True)
     assert not bad.ok and bad.reason  # explicit status, no exception
 
 
@@ -150,7 +149,8 @@ def test_versioned_json_round_trip_and_schema(analysed, tmp_path):
     for obj, name in ((u, "gyeol.representation"), (e, "gyeol.explanation")):
         text = api.to_json(obj, tmp_path / f"{name}.json")
         doc = json.loads(text)
-        assert doc["schema"] == name and doc["version"] == 1
+        assert doc["schema"] == name and doc["version"] == {"gyeol.representation": 2, "gyeol.explanation": 1}[name]
+        assert "provenance" not in doc
         _validate(doc, api.json_schema(name))
         back = api.from_json(tmp_path / f"{name}.json")
         assert json.loads(api.to_json(back)) == doc  # lossless for everything the schema carries
@@ -168,11 +168,11 @@ def test_versioned_json_round_trip_and_schema(analysed, tmp_path):
 
 
 def test_json_leaves_out_biometrics_by_default(analysed):
-    from gyeol.core.consent import SingerVector
+    from gyeol.core import SingerVector
     from gyeol.schema import representation_to_dict
 
     _, _, _, u = analysed
-    u.singer = SingerVector(np.ones(4), u.provenance, u.recording_id, "u1")
+    u.singer = SingerVector(np.ones(4), u.recording_id)
     u.meta["separated_audio"] = np.zeros(10)
     d = representation_to_dict(u)
     assert "singer" not in d and "residual" not in d and "separated_audio" not in d["meta"]
@@ -181,26 +181,30 @@ def test_json_leaves_out_biometrics_by_default(analysed):
     u.meta.pop("separated_audio")
 
 
-def test_render_demo_needs_the_owners_voice_synthesis_consent(analysed, tmp_path):
-    from gyeol.demo import read_label
-
-    target, take, t, u = analysed
+def test_render_demo_returns_plain_audio(analysed, tmp_path):
+    _, take, t, u = analysed
     e = api.compare(u, t).unwrap()
-    no_synth = api.ConsentToken("u1", frozenset({api.Purpose.ANALYSIS}))
-    with pytest.raises(api.ConsentError):
-        api.render_demo(api.OwnVoice(take.audio, SR, u, no_synth), e, t)
-    other = api.ConsentToken("someone-else", frozenset({api.Purpose.VOICE_SYNTHESIS}))
-    with pytest.raises(api.ConsentError):
-        api.render_demo(api.OwnVoice(take.audio, SR, u, other), e, t)
-    ok = api.ConsentToken("u1", frozenset({api.Purpose.VOICE_SYNTHESIS}))
-    d = api.render_demo(api.OwnVoice(take.audio, SR, u, ok), e, t, out_dir=tmp_path).unwrap()
+    d = api.render_demo(take.audio, SR, u, e, t, out_dir=tmp_path).unwrap()
+    assert isinstance(d.baseline, np.ndarray) and all(isinstance(y, np.ndarray) for y in d.steps) and d.sr == SR
     meta = json.loads((tmp_path / "demo.json").read_text())
     _validate(meta, api.json_schema("gyeol.demo"))
-    assert meta["ai_generated"] and meta["profile"] == "commercial" and len(meta["steps"]) == len(d.files) - 1
-    assert all(read_label(p)["ai_generated"] for p in d.files.values())
-    # a reference (another person's) recording can never be the "own voice"
-    with pytest.raises((api.ConsentError, ValueError)):
-        api.render_demo(api.OwnVoice(target.audio, SR, t, ok), e, t)
+    assert meta["version"] == 2 and len(meta["steps"]) == len(d.files) - 1 == len(d.steps)
+    assert not {"ai_generated", "profile", "provenance"} & set(meta)
+    assert all(p.exists() and p.suffix == ".wav" and not p.with_suffix(".ai.json").exists() for p in d.files.values())
+    # without out_dir nothing is written
+    d2 = api.render_demo(take.audio, SR, u, e, t).unwrap()
+    assert d2.files == {} and np.allclose(d2.baseline, d.baseline)
+    # the audio must be the audio the representation was analysed from
+    with pytest.raises(ValueError, match="sample rates differ"):
+        api.render_demo(take.audio, SR // 2, u, e, t)
+
+
+def test_old_v1_documents_are_still_read(analysed):
+    _, _, _, u = analysed
+    doc = json.loads(api.to_json(u))
+    doc.update(version=1, provenance="user")
+    back = api.from_json(json.dumps(doc))
+    assert back.recording_id == u.recording_id
 
 
 def test_coach_demo_uses_the_public_api_only():
@@ -221,86 +225,4 @@ def test_api_train(tmp_path):
         f"data.cache={tmp_path / 'cache'}", f"run.out={tmp_path / 'run'}", "run.max_steps=4", "run.val_every=2",
         "data.synthetic={n_singers: 3, seconds: 0.6}", "data.split={train: 0.34, val: 0.33, test: 0.33}"])
     r = api.train(cfg, log=lambda s: None)
-    assert r.status == "finished" and r.report["profile"] == "commercial"
-
-
-# ================================================================ C3 personal profile
-
-
-def test_personal_profile_decisions():
-    for name in ("openvpi_nsf_hifigan", "gtsinger"):
-        a = lookup(name)
-        assert not decide(a, Profile.COMMERCIAL).allowed  # the commercial profile is unchanged
-        d = decide(a, Profile.PERSONAL)
-        assert d.allowed and any("non-commercial" in n for n in d.notices)
-    assert decide(lookup("vocalset"), Profile.PERSONAL).allowed
-    from gyeol.core.license import AssetKind, unknown_asset
-
-    assert not decide(unknown_asset("mystery", AssetKind.DATASET), Profile.PERSONAL).allowed
-    assert decide(unknown_asset("mystery", AssetKind.DATASET), Profile.RESEARCH).allowed
-
-
-def test_personal_checkpoints_carry_the_profile(tmp_path):
-    import torch
-
-    from gyeol.train.checkpoint import load_checkpoint, save_checkpoint
-
-    sd = {"w": torch.ones(2)}
-    with pytest.raises(LicenseError):
-        save_checkpoint(tmp_path / "c.pt", sd, name="v", sources=["openvpi_nsf_hifigan"], config={}, profile=Profile.COMMERCIAL)
-    info = save_checkpoint(tmp_path / "p.pt", sd, name="v", sources=["openvpi_nsf_hifigan", "vocalset"], config={}, profile=Profile.PERSONAL)
-    assert info.profile is Profile.PERSONAL and info.license.value == "noncommercial"
-    _, back = load_checkpoint(tmp_path / "p.pt", Profile.PERSONAL)
-    assert back.profile is Profile.PERSONAL
-    with pytest.raises(LicenseError):
-        load_checkpoint(tmp_path / "p.pt", Profile.COMMERCIAL)
-    # even from commercially clean sources, a personal-profile checkpoint stays out of commercial use
-    save_checkpoint(tmp_path / "q.pt", sd, name="q", sources=["vocalset"], config={}, profile=Profile.PERSONAL)
-    with pytest.raises(LicenseError, match="personal profile"):
-        load_checkpoint(tmp_path / "q.pt", Profile.COMMERCIAL)
-    save_checkpoint(tmp_path / "r.pt", sd, name="r", sources=["vocalset"], config={}, profile=Profile.RESEARCH)
-    load_checkpoint(tmp_path / "r.pt", Profile.COMMERCIAL)  # unchanged behaviour for other profiles
-
-
-def test_outputs_made_under_personal_carry_the_tag(analysed, tmp_path):
-    target, take, _, _ = analysed
-    t = api.analyze(target.audio, SR, role="reference", dsp_only=True, profile="personal").unwrap()
-    u = api.analyze(take.audio, SR, owner_id="u1", dsp_only=True).unwrap()
-    assert t.meta["profile"] == "personal" and u.meta["profile"] == "commercial"
-    e = api.compare(u, t).unwrap()
-    assert e.meta["profile"] == "personal"  # the most restrictive input wins
-    assert json.loads(api.to_json(e))["meta"]["profile"] == "personal"
-    tok = api.ConsentToken("u1", frozenset({api.Purpose.VOICE_SYNTHESIS}))
-    d = api.render_demo(api.OwnVoice(take.audio, SR, u, tok), e, t, out_dir=tmp_path).unwrap()
-    assert d.metadata["profile"] == "personal" and all(s["metadata"]["profile"] == "personal" for s in d.metadata["steps"])
-
-
-def test_personal_training_run_and_noncommercial_data(tmp_path):
-    from gyeol.data.manifest import Manifest, ManifestItem, open_manifest
-    from gyeol.train.checkpoint import load_checkpoint
-    from gyeol.train.config import load_config
-
-    m = Manifest("gtsinger", str(tmp_path), [ManifestItem("a.wav", "s1", {})])
-    with pytest.raises(LicenseError):
-        open_manifest(m, Profile.COMMERCIAL)
-    assert open_manifest(m, Profile.PERSONAL).profile is Profile.PERSONAL
-    cfg = load_config(ROOT / "configs" / "cpu-smoke" / "heads.yaml", overrides=[
-        "profile=personal", f"data.cache={tmp_path / 'cache'}", f"run.out={tmp_path / 'run'}", "run.max_steps=2", "run.val_every=2",
-        "data.synthetic={n_singers: 3, seconds: 0.6}", "data.split={train: 0.34, val: 0.33, test: 0.33}"])
-    r = api.train(cfg, log=lambda s: None)
-    assert r.report["profile"] == "personal"
-    _, info = load_checkpoint(r.best_checkpoint, Profile.PERSONAL)
-    assert info.profile is Profile.PERSONAL
-    with pytest.raises(LicenseError):
-        load_checkpoint(r.best_checkpoint, Profile.COMMERCIAL)
-
-
-def test_cli_lists_the_personal_profile(capsys):
-    from gyeol.cli import main
-
-    assert main(["licenses", "--profile", "personal"]) == 0
-    out = capsys.readouterr().out
-    line = next(x for x in out.splitlines() if x.startswith("openvpi_nsf_hifigan"))
-    assert "allowed" in line
-    unknownish = [x for x in out.splitlines() if x.split()[0] in ("so_vits_svc",)]
-    assert unknownish and "allowed" in unknownish[0]  # copyleft code may be used personally (never vendored)
+    assert r.status == "finished" and r.report["provenance"]["sources"] == ["gyeol_synthetic"]

@@ -2,11 +2,10 @@
 # pretrained reference weights (`gyeol fetch rmvpe`, Apache-2.0).
 # Ground truth: exact f0 of resynthesised copies (MDB-stem-synth-style harmonic-plus-noise resynthesis, plus copies from
 # a gyeol-trained vocoder if you add `vocoder` and resynth_vocoder); DSP consensus is a weak label on confident frames only.
-# Evaluation: human-annotated real singing (Vocadito, MIR-1K manifests from gyeol.data.pitch_sets) — register each set
-# with its verified license first; the gate runs under this run's profile (MIR-1K's license is unclear: research only).
+# Evaluation: human-annotated real singing (Vocadito, MIR-1K manifests from gyeol.data.pitch_sets)
+# (their listed licenses are in the README).
 task: pitch
 seed: 0
-profile: commercial
 device: auto
 threads: 0
 data:

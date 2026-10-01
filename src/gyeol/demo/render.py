@@ -1,4 +1,4 @@
-"""Stepwise own-voice demos.
+"""Stepwise demos: a take re-rendered with explanation items corrected.
 
 :func:`stepwise_schedule` builds the steps (brief §5.6):
 
@@ -7,24 +7,22 @@
    item, at increasing fractions ``partial`` of the way to the target style.
 
 :func:`render_demo` renders an unedited baseline (the same renderer with no
-edit, for fair A/B listening) and each step, clamps every edit to the user's
-feasible range, and returns only :class:`~gyeol.demo.label.LabelledAudio`
-(AI-labelled and watermarked).  It requires a
-:class:`~gyeol.core.consent.ConsentedVoice` and the user's own take.
+edit, for fair A/B listening) and each step, clamps every edit to the
+singer's feasible range (from the take itself unless given), and returns
+plain audio arrays with a description of what each step applied.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..core.consent import ConsentedVoice
+import numpy as np
+
 from ..core.containers import Explanation, ExplanationItem, Representation
 from ..core.status import Result
 from .edits import Edit, EditConfig, ItemKey, edit_for_item, item_key
 from .feasible import ClampReport, FeasibleRange, clamp_edit
-from .label import LabelledAudio, label_ai_generated
-from .renderers import Renderer, UserTake, check_take
-from .watermark import SpreadSpectrumWatermark, WatermarkHook
+from .renderers import Renderer, Take, _check
 
 
 @dataclass
@@ -51,28 +49,30 @@ def stepwise_schedule(exp: Explanation, selected: ItemKey, partial: tuple[float,
 @dataclass
 class RenderedStep:
     step: DemoStep
-    audio: LabelledAudio
+    audio: np.ndarray
     clamp: ClampReport
     skipped: dict[ItemKey, str]
+    applied: dict = field(default_factory=dict)  # items, alpha and clamping actually applied
 
 
 @dataclass
 class Demo:
-    baseline: LabelledAudio
+    baseline: np.ndarray
     steps: list[RenderedStep]
     feasible: FeasibleRange
+    sr: int = 0
+    renderer: str = ""
 
 
 def _items_by_key(exp: Explanation) -> dict[ItemKey, ExplanationItem]:
     return {item_key(it): it for it in exp.items}
 
 
-def render_demo(voice: ConsentedVoice, take: UserTake, exp: Explanation, target: Representation, selected: ItemKey,
-                renderer: Renderer, *, feasible: FeasibleRange | None = None, schedule: list[DemoStep] | None = None,
-                watermark: WatermarkHook | None = None, edit_config: EditConfig | None = None, seed: int = 0) -> Result[Demo]:
-    """Render the stepwise demo for ``selected`` in the user's own consented voice."""
-    check_take(voice, take)  # raises ConsentError before any rendering
-    wm = watermark or SpreadSpectrumWatermark()
+def render_demo(take: Take, exp: Explanation, target: Representation, selected: ItemKey, renderer: Renderer, *,
+                feasible: FeasibleRange | None = None, schedule: list[DemoStep] | None = None, edit_config: EditConfig | None = None,
+                seed: int = 0) -> Result[Demo]:
+    """Render the stepwise demo for ``selected``: the take with that item (and then others) corrected."""
+    _check(take)
     items = _items_by_key(exp)
     if selected not in items:
         return Result.failure(f"item {selected} is not in the explanation")
@@ -94,12 +94,9 @@ def render_demo(voice: ConsentedVoice, take: UserTake, exp: Explanation, target:
         return Result.unavailable(f"cannot render a demo for {selected}: {skipped.get(selected, 'no edit')}")
     steps = schedule or stepwise_schedule(exp, selected, renderable=set(edits))
 
-    base = renderer.render(voice, take, None, seed=seed)
+    base = renderer.render(take, None, seed=seed)
     if not base.ok:
         return Result.failure(f"baseline render failed: {base.reason}")
-    profile = exp.meta.get("profile", take.rep.meta.get("profile", "commercial"))
-    lab = lambda y, d: label_ai_generated(y, take.recording.sr, voice=voice, renderer=renderer.name, description=d, watermark=wm,  # noqa: E731
-                                          profile=profile)
     out = []
     for st in steps:
         e = edits[st.selected]
@@ -109,10 +106,10 @@ def render_demo(voice: ConsentedVoice, take: UserTake, exp: Explanation, target:
                 e = e + edits[k].scaled(st.alpha)
                 used.append(k)
         e, rep = clamp_edit(e, take.rep, rng)
-        r = renderer.render(voice, take, e, seed=seed)
+        r = renderer.render(take, e, seed=seed)
         if not r.ok:
             return Result.failure(f"step {st.label} failed: {r.reason}")
         desc = {"step": st.label, "alpha": st.alpha, "items": [list(k) for k in used], "clamped_fraction": rep.clamped_fraction,
                 "feasible_range_source": rng.source}
-        out.append(RenderedStep(st, lab(r.value, desc), rep, {k: v for k, v in skipped.items() if k in st.others}))
-    return Result.success(Demo(lab(base.value, {"step": "baseline", "items": []}), out, rng))
+        out.append(RenderedStep(st, r.value, rep, {k: v for k, v in skipped.items() if k in st.others}, desc))
+    return Result.success(Demo(base.value, out, rng, take.recording.sr, renderer.name))

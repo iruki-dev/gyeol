@@ -7,8 +7,7 @@
 * :class:`~gyeol.pitch.rmvpe.RMVPETracker` – gyeol's reimplementation of
   RMVPE (M8); loads Apache-2.0 weights the user fetched with ``gyeol fetch rmvpe``.
 
-Neural adapters check the license registry under the active profile when
-constructed and return ``Status.UNAVAILABLE`` if their package is missing.
+Neural adapters return ``Status.UNAVAILABLE`` if their package is missing.
 gyeol never downloads their weights; installing the package is the user's
 explicit action.
 """
@@ -19,7 +18,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..core.license import Profile, lookup, require_allowed
 from ..core.status import Result
 from ..dsp.base import n_frames, resample
 from . import dsp_trackers
@@ -72,8 +70,7 @@ class SwiftF0Tracker:
     name = "swiftf0"
     asset = "swiftf0"
 
-    def __init__(self, profile: Profile = Profile.COMMERCIAL, fmin: float | None = None, fmax: float | None = None):
-        require_allowed(lookup(self.asset), profile, announce=False)
+    def __init__(self, fmin: float | None = None, fmax: float | None = None):
         self.fmin, self.fmax = fmin, fmax
         self._model = None
 
@@ -97,8 +94,7 @@ class FCPETracker:
     name = "fcpe"
     asset = "fcpe"
 
-    def __init__(self, profile: Profile = Profile.COMMERCIAL, fmin: float = 55.0, fmax: float = 1600.0, threshold: float = 0.006):
-        require_allowed(lookup(self.asset), profile, announce=False)
+    def __init__(self, fmin: float = 55.0, fmax: float = 1600.0, threshold: float = 0.006):
         self.fmin, self.fmax, self.threshold = fmin, fmax, threshold
         self._model = None
 
@@ -124,18 +120,18 @@ class FCPETracker:
         return Result.success(PitchTrack(self.name, times, np.where(voiced, f0, np.nan), voiced.astype(float)))
 
 
-def default_trackers(profile: Profile = Profile.COMMERCIAL, rmvpe_weights: str | None = None) -> list:
+def default_trackers(rmvpe_weights: str | None = None) -> list:
     """Neural trackers when installed (RMVPE when fetched weights are given), padded with DSP trackers to at least three."""
     from .rmvpe import RMVPETracker
 
-    out: list = [RMVPETracker(rmvpe_weights, profile)] if rmvpe_weights else []
+    out: list = [RMVPETracker(rmvpe_weights)] if rmvpe_weights else []
     for cls in (SwiftF0Tracker, FCPETracker):
         pkg = "swift_f0" if cls is SwiftF0Tracker else "torchfcpe"
         try:
             __import__(pkg)
         except ImportError:
             continue
-        out.append(cls(profile))
+        out.append(cls())
     for mk in (PyinTracker, SHSTracker, YinTracker):
         if len(out) >= 3:
             break

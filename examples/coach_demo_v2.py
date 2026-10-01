@@ -6,15 +6,15 @@
     # real recordings: target guide vocal + one or more sing-along takes
     python examples/coach_demo_v2.py --target guide.wav --user take1.wav take2.wav --lyrics "사랑해 너를"
 
-    # audibility per item, and a stepwise own-voice demo of the top item
+    # audibility per item, and a stepwise demo of the top item in the user's voice
     python examples/coach_demo_v2.py --synthetic --audibility --render-demo
 
 Steps: analyse the guide → analyse each take with latency refinement against
 the guide → compare → Korean text from resource files → versioned JSON
-(``explanation.json``, ``gyeol.explanation`` v1).  With ``--audibility`` /
-``--render-demo`` the demo user's consent token includes ``voice_synthesis``;
-only their **own** last take is ever re-rendered (never the target), and every
-rendered file is AI-labelled and watermarked.
+(``explanation.json``, ``gyeol.explanation`` v1).  ``--audibility`` and
+``--render-demo`` re-render the user's last take with the edits applied.
+Consent, labelling and storage of rendered audio are the application's
+policy (see the reference service).
 
 The coaching session (feedback fading, attempt history, self-assessment) is
 user state and lives in the reference service: see
@@ -71,7 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--show-all", action="store_true", help="list every item, ignoring the demo display filter")
     ap.add_argument("--audibility", action="store_true", help="score audibility per item (renders your own voice)")
     ap.add_argument("--render-demo", action="store_true", help="render a stepwise own-voice demo of the top item")
-    ap.add_argument("--profile", default="commercial", choices=["commercial", "research", "personal"])
     args = ap.parse_args(argv)
 
     if args.synthetic:
@@ -84,17 +83,16 @@ def main(argv: list[str] | None = None) -> int:
 
     dsp_only = args.dsp_only or args.synthetic
     guide, gsr = api.load_audio(target_path)
-    t = api.analyze(guide, gsr, role="reference", lyrics=lyrics or None, dsp_only=dsp_only, profile=args.profile)
+    t = api.analyze(guide, gsr, lyrics=lyrics or None, dsp_only=dsp_only)
     if not t.usable:
         print(f"target analysis failed: {t.reason}", file=sys.stderr)
         return 2
     target = t.value
 
-    owner = "demo-user"
     takes, last = [], None
     for p in user_paths:
         x, sr = api.load_audio(p)
-        r = api.analyze(x, sr, owner_id=owner, reference=(guide, gsr), dsp_only=dsp_only, profile=args.profile)
+        r = api.analyze(x, sr, reference=(guide, gsr), dsp_only=dsp_only)
         if not r.usable:
             print(f"{p.name}: analysis failed: {r.reason}", file=sys.stderr)
             continue
@@ -105,12 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     if not takes:
         return 2
 
-    own = None
-    if args.audibility or args.render_demo:
-        # in the app the user grants this on a consent screen (and the service stores it); here the demo user does
-        token = api.ConsentToken(owner, frozenset({api.Purpose.ANALYSIS, api.Purpose.VOICE_SYNTHESIS}))
-        own = api.OwnVoice(last[0], last[1], last[2], token)
-    ex = api.compare(takes, target, audibility=own if args.audibility else None)
+    ex = api.compare(takes, target, audibility=(last[0], last[1]) if args.audibility else None)
     if not ex.usable:
         print(f"explanation failed: {ex.reason}", file=sys.stderr)
         return 2
@@ -137,20 +130,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  (작은 차이 {hidden}개는 숨겼어요 — --show-all 로 모두 보기)")
     if not args.audibility:
         print(f"\n  · {s['audibility']['unavailable']}")
-    print(f"\n  explanation.json ({e.meta.get('profile')} profile) → {args.out / 'explanation.json'}")
+    print(f"\n  explanation.json → {args.out / 'explanation.json'}")
     if args.render_demo:
-        return _render(own, e, target, args.out)
+        return _render(last, e, target, args.out)
     return 0
 
 
-def _render(own, e, target, out: Path) -> int:
-    d = api.render_demo(own, e, target, out_dir=out)
+def _render(last, e, target, out: Path) -> int:
+    x, sr, rep = last
+    d = api.render_demo(x, sr, rep, e, target, out_dir=out)
     if not d.usable:
         print(f"demo not rendered: {d.reason}", file=sys.stderr)
         return 0
     ds = api.load_strings("ko", "demo")
     print(f"\n=== 내 목소리 시범: {api.item_text(d.value.item)} ===")
-    print(f"  · {ds['ai_notice']}")
     print(f"  {d.value.files['baseline'].name} — {ds['baseline']}")
     for i, st in enumerate(d.value.metadata["steps"], 1):
         label = ds["step"]["selected"] if st["label"] == "selected" else ds["step"]["toward_target"].format(percent=round(100 * st["alpha"]))

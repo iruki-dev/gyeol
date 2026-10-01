@@ -1,6 +1,6 @@
 """Batch data preparation for training (revision B6): ``gyeol prepare --manifest ...``.
 
-For every item of one or more license-gated manifests (VocalSet, GTSinger,
+For every item of one or more manifests (VocalSet, GTSinger,
 AI Hub, own recordings — any :mod:`gyeol.data.adapters` output, or the
 synthetic corpus below) this runs
 
@@ -30,7 +30,6 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-from ..core.license import Profile
 from ..core.status import Result
 from .manifest import Manifest, ManifestItem, open_manifest
 
@@ -51,10 +50,12 @@ class PrepareConfig:
     min_voiced_frames: int = 10
     #: revision D3 — exact-f0 copies for pitch training: "hnm" (MDB-stem-synth-style harmonic-plus-noise
     #: resynthesis with the analysed f0) and/or "vocoder" (a gyeol-trained NSF vocoder, ``resynth_vocoder``).
-    #: The f0 the copy is synthesised with is its ground truth (``f0_exact``); never applied to app users' recordings.
+    #: The f0 the copy is synthesised with is its ground truth (``f0_exact``).
     resynthesize: tuple[str, ...] = ()
     resynth_vocoder: str | None = None
     resynth_min_confidence: float = 0.5  # analysed frames below this confidence are synthesised unvoiced
+    #: datasets that get no resynthesised copies (the application decides; by default its own users' recordings)
+    resynth_skip_datasets: tuple[str, ...] = ("own_recordings",)
 
 
 @dataclass
@@ -77,7 +78,6 @@ def item_id(dataset: str, item: ManifestItem) -> str:
 
 def _prepare_one(audio: np.ndarray, sr: int, cfg: PrepareConfig, ssl_encoder=None) -> Result[dict]:
     from ..attributes.extract import AnalysisConfig, analyze
-    from ..core.consent import Provenance
     from ..core.containers import Recording
     from ..dsp.base import resample
     from ..encoders.frame import DSPFrameFeatures
@@ -89,7 +89,7 @@ def _prepare_one(audio: np.ndarray, sr: int, cfg: PrepareConfig, ssl_encoder=Non
         return Result.failure(f"too short ({len(x) / cfg.sr:.2f} s)")
     trackers = [PyinTracker(), YinTracker(), SHSTracker()] if cfg.dsp_trackers_only else None
     # dataset recordings are reference material, not app users
-    r = analyze(Recording(x, cfg.sr, Provenance.REFERENCE), trackers=trackers, config=AnalysisConfig(hop=cfg.hop, keep_separated_audio=True), separation=cfg.separation)
+    r = analyze(Recording(x, cfg.sr), trackers=trackers, config=AnalysisConfig(hop=cfg.hop, keep_separated_audio=True), separation=cfg.separation)
     if not r.usable:
         return Result.failure(f"analysis failed: {r.reason}")
     rep = r.value
@@ -143,7 +143,7 @@ def _save_npz_atomic(path: Path, arrays: dict) -> None:
         raise
 
 
-def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path, profile: Profile | str = Profile.COMMERCIAL,
+def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path,
             config: PrepareConfig | None = None, *, ssl_encoder=None, limit: int | None = None,
             progress: Callable[[str], None] | None = None) -> PrepareReport:
     """Prepare every item of ``manifests`` into ``out_dir`` (resumable; see module docstring)."""
@@ -157,16 +157,16 @@ def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path, pro
     rep = PrepareReport(out)
     meta_path = out / "prepare.json"
     settings = {"format": FORMAT, "sr": cfg.sr, "hop": cfg.hop, "separation": cfg.separation, "features": list(cfg.features),
-                "curves": list(CACHED_CURVES), "profile": Profile(profile).value}
+                "curves": list(CACHED_CURVES)}
     if meta_path.exists():
         old = json.loads(meta_path.read_text(encoding="utf-8"))
-        clash = {k: (old.get(k), v) for k, v in settings.items() if k != "profile" and old.get(k) != v}
+        clash = {k: (old.get(k), v) for k, v in settings.items() if old.get(k) != v}
         if clash:
             raise ValueError(f"{out} was prepared with different settings {clash}; use a new output folder")
     meta_path.write_text(json.dumps(settings, indent=1), encoding="utf-8")
     n = 0
     for m in manifests:
-        ds = open_manifest(m, profile)  # license gate before any item is read
+        ds = open_manifest(m)
         for item in ds:
             if limit is not None and n >= limit:
                 break
@@ -200,11 +200,11 @@ def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path, pro
             _save_npz_atomic(items_dir / f"{iid}.npz", arrays)
             info = {"id": iid, "dataset": ds.manifest.dataset, "path": item.path, "singer": item.singer or "",
                     "labels": item.labels, "meta": item.meta, "n_frames": int(arrays["n_frames"]), "n_samples": int(len(arrays["audio"])),
-                    "license": ds.asset.tag.value}
+                    "license": ds.info["license"]}
             done.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
             rep.done += 1
             for method in cfg.resynthesize:
-                _resynth_item(items_dir, out, arrays, info, method, cfg, profile, rep, progress)
+                _resynth_item(items_dir, out, arrays, info, method, cfg, rep, progress)
     write_index(out)
     rep.seconds = time.time() - t0
     return rep
@@ -213,7 +213,7 @@ def prepare(manifests: Sequence[Manifest | str | Path], out_dir: str | Path, pro
 _VOCODERS: dict = {}
 
 
-def resynthesize_exact_f0(arrays: dict, cfg: PrepareConfig, method: str, profile=Profile.COMMERCIAL) -> Result[tuple[np.ndarray, np.ndarray]]:
+def resynthesize_exact_f0(arrays: dict, cfg: PrepareConfig, method: str) -> Result[tuple[np.ndarray, np.ndarray]]:
     """(audio, exact f0 per frame in Hz, NaN = unvoiced) synthesised with the analysed f0 of a prepared item."""
     from ..core.grid import FrameGrid
 
@@ -234,11 +234,11 @@ def resynthesize_exact_f0(arrays: dict, cfg: PrepareConfig, method: str, profile
 
         if not cfg.resynth_vocoder:
             return Result.failure("resynthesize 'vocoder' needs resynth_vocoder (a checkpoint from gyeol train vocoder)")
-        key = (cfg.resynth_vocoder, Profile(profile))
+        key = cfg.resynth_vocoder
         if key not in _VOCODERS:
             from ..train.tasks import vocoder_from_checkpoint
 
-            _VOCODERS[key] = vocoder_from_checkpoint(cfg.resynth_vocoder, profile)
+            _VOCODERS[key] = vocoder_from_checkpoint(cfg.resynth_vocoder)
         voc, mel, _ = _VOCODERS[key]
         if voc.sr != cfg.sr or voc.hop != cfg.hop:
             return Result.failure(f"vocoder runs at {voc.sr} Hz / hop {voc.hop}, the cache at {cfg.sr} / {cfg.hop}")
@@ -256,16 +256,16 @@ def resynthesize_exact_f0(arrays: dict, cfg: PrepareConfig, method: str, profile
     return Result.failure(f"unknown resynthesis method {method!r} (hnm | vocoder)")
 
 
-def _resynth_item(items_dir: Path, out: Path, arrays: dict, info: dict, method: str, cfg: PrepareConfig, profile, rep: PrepareReport,
+def _resynth_item(items_dir: Path, out: Path, arrays: dict, info: dict, method: str, cfg: PrepareConfig, rep: PrepareReport,
                   progress) -> None:
     rid = f"{info['id']}~{method}"
     if (items_dir / f"{rid}.done").exists():
         return
     fail = None
-    if info["dataset"] == "own_recordings":
-        fail = "resynthesis of app users' recordings is not allowed (voice synthesis needs the owner's separate consent)"
+    if info["dataset"] in cfg.resynth_skip_datasets:
+        fail = f"dataset {info['dataset']!r} is in resynth_skip_datasets"
     else:
-        r = resynthesize_exact_f0(arrays, cfg, method, profile)
+        r = resynthesize_exact_f0(arrays, cfg, method)
         if not r.usable:
             fail = r.reason
         else:

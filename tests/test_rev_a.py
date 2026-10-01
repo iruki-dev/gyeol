@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from gyeol.core import Provenance, Recording
+from gyeol.core import Recording
 from gyeol.explain import explain
 from gyeol.synth import accompaniment
 
@@ -17,7 +17,7 @@ from .helpers import SR, dsp_trackers, make_melody, rep_of
 
 @pytest.fixture(scope="module")
 def target_rep():
-    return rep_of(make_melody(seed=1).audio, Provenance.REFERENCE).unwrap()
+    return rep_of(make_melody(seed=1).audio).unwrap()
 
 
 def _with_backing(voc, level_db, seed=7):
@@ -90,7 +90,7 @@ def test_unseparated_penalty_is_graded_by_residual_level():
 def test_analyze_separation_modes():
     voc = make_melody(seed=5).audio
     mix, back = _with_backing(voc, -6)
-    rec = Recording(mix, SR, Provenance.SYNTHETIC)
+    rec = Recording(mix, SR)
     off = rep_of(mix, separation="off").unwrap()
     assert off.quality["separation"]["applied"] is False and off.meta["analysis_signal"] == "input"
     # a known backing track → cancelled first, quality measured against it
@@ -183,20 +183,14 @@ def test_roformer_separator_chunking_reconstructs_and_gates(tmp_path, monkeypatc
     assert RoFormerSeparator.from_cache().status.name == "UNAVAILABLE"  # never downloads
 
 
-def test_roformer_asset_is_registered_and_fetch_asks_first(capsys):
-    import io
-
+def test_roformer_asset_is_listed_with_url_and_checksum(capsys):
     from gyeol.cli import main
-    from gyeol.core.license import Profile, decide, lookup
+    from gyeol.core import asset
 
-    a = lookup("bs_roformer_viperx_ep317")
-    assert a.url and a.url.endswith(".ckpt") and decide(a, Profile.COMMERCIAL).allowed
-    assert any("provenance" in c.lower() or "license" in c.lower() for c in a.caveats)
-    import gyeol.cli as cli
-
-    assert cli._fetch(type("A", (), {"name": a.name, "profile": "commercial", "yes": False})(), stdin=io.StringIO("no\n")) == 1
-    assert "aborted" in capsys.readouterr().out
-    assert main(["licenses"]) == 0
+    a = asset("bs_roformer_viperx_ep317")
+    assert a.url and a.url.endswith(".ckpt") and len(a.sha256) == 64
+    assert any("provenance" in n.lower() for n in a.notes)
+    assert main(["licenses"]) == 0 and "bs_roformer_viperx_ep317" in capsys.readouterr().out
 
 
 def test_roformer_matches_reference_implementation():
@@ -331,7 +325,7 @@ def test_contour_items_find_transition_spans():
 
     def rep(v):
         curves = AttributeCurves(g, {"f0_cents": AttributeCurve("f0_cents", v.copy(), np.ones(100), g, "cents")})
-        return Representation(g, curves, "r", Provenance.SYNTHETIC)
+        return Representation(g, curves, "r")
 
     diff = np.zeros(100)
     diff[48:58] = 80.0  # across the boundary between note 0 (0..50) and note 1 (50..100)

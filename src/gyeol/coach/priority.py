@@ -3,7 +3,7 @@
 ``score = confidence × audibility`` (both from the explanation; confidence
 is the calibrated item confidence, audibility the M5 render-based score).
 
-When audibility is unavailable (no ``voice_synthesis`` consent, or the
+When audibility is unavailable (it was not scored, or the
 renderer cannot correct the item) the fallback is
 ``confidence × |magnitude| / U(confidence)`` — the size of the difference in
 units of its own measurement uncertainty (:mod:`gyeol.coach.thresholds`), so
