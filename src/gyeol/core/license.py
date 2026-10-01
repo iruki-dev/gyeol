@@ -102,6 +102,13 @@ REGISTRY: dict[str, LicensedAsset] = {
         _a("swiftf0", C, OK, "MIT", "SwiftF0"),
         _a("roformer_community", C, OK, "MIT", "community Mel/BS-RoFormer weights",
            caveats=("Training-data provenance of the community weights is unclear.",)),
+        _a("bs_roformer_viperx_ep317", C, OK, "MIT (as listed for community RoFormer weights)",
+           "viperx BS-RoFormer vocal model (model_bs_roformer_ep_317_sdr_12.9755; UVR public model repository); "
+           "architecture: gyeol.frontend.roformer.BSRoFormer with VIPERX_EP317",
+           caveats=("Training-data provenance of the community weights is unclear.",
+                    "The model repository states no separate weights license; verify it before a commercial release.",
+                    "Checksum not pinned yet: record the SHA-256 of your first verified download in the registry."),
+           url="https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
         _a("openvpi_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
         _a("openvpi_pc_nsf_hifigan", C, NC, "CC-BY-NC-SA-4.0", "openvpi vocoders (pretrained weights)"),
         _a("gyeol_synthetic", D, OK, "generated (no recordings, no people)", "gyeol.synth / gyeol.eval.knob_recovery"),

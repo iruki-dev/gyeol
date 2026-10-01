@@ -186,6 +186,13 @@ def edit_for_item(item: ExplanationItem, user: Representation, target: Represent
     if attr in ("intonation_offset", "global_offset"):
         return mk(f0_cents=-item.magnitude * _ramp_box(T, *span, ramp), requires=frozenset({"f0"}))
 
+    if attr in ("contour_deviation", "transition_deviation"):
+        # the per-frame difference along the span (attack, release or transition), removed with soft edges
+        if item.delta is None:
+            return Result.failure(f"{attr} item without a per-frame difference")
+        d = -np.nan_to_num(np.asarray(item.delta, float))
+        return mk(f0_cents=d * _smooth_mask(np.isfinite(item.delta), ramp), requires=frozenset({"f0"}))
+
     if attr == "interval_compression":
         slope = 1.0 + item.magnitude / 100.0
         if slope <= 0.05:

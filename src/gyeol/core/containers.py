@@ -171,14 +171,50 @@ class ExplanationItem:
 
 
 @dataclass
+class Premise:
+    """A condition a judgement depends on, checked before the judgement is made.
+
+    ``passed`` is None when the premise could not be checked (that counts as
+    not established).  ``measures`` holds the numbers the check used.
+    """
+
+    name: str  # e.g. "shared_clock", "octave_relation"
+    statement: str  # what must be true, in plain English
+    passed: bool | None
+    reason: str = ""
+    measures: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def holds(self) -> bool:
+        return self.passed is True
+
+
+@dataclass
+class WithheldItem:
+    """A judgement that was not made because a premise failed."""
+
+    category: str
+    attribute: str
+    target_note: int
+    premise: str
+    reason: str
+
+
+@dataclass
 class Explanation:
     grid: FrameGrid  # user grid
     warp: np.ndarray  # τ(t): target frame (float) for each user frame
-    transposition_cents: float
+    #: octave / key relation user − target; None when it could not be established (comparison is then octave-invariant)
+    transposition_cents: float | None
     items: list[ExplanationItem]
     cannot_judge: list[Span]
     n_takes: int
     meta: dict[str, Any] = field(default_factory=dict)
+    premises: dict[str, Premise] = field(default_factory=dict)
+    withheld: list[WithheldItem] = field(default_factory=list)
+    #: how each aspect was compared, e.g. {"timing": "shared_clock" | "content_aligned",
+    #: "pitch": "absolute" | "octave_invariant"}
+    comparison_mode: dict[str, str] = field(default_factory=dict)
 
     def by_category(self, category: str) -> list[ExplanationItem]:
         return [i for i in self.items if i.category == category]

@@ -8,6 +8,8 @@ from .containers import (
     Event,
     Explanation,
     ExplanationItem,
+    Premise,
+    WithheldItem,
     Recording,
     Representation,
     Span,
@@ -18,7 +20,7 @@ from .status import Result, ResultError, Status
 
 __all__ = [
     "AssetKind", "AttributeCurve", "AttributeCurves", "ConsentError", "ConsentToken", "ConsentedVoice", "Consistency",
-    "DEFAULT_HOP", "DEFAULT_SR", "Event", "Explanation", "ExplanationItem", "FrameGrid", "GridMismatchError",
+    "DEFAULT_HOP", "DEFAULT_SR", "Event", "Explanation", "ExplanationItem", "Premise", "WithheldItem", "FrameGrid", "GridMismatchError",
     "LicenseError", "LicenseTag", "LicensedAsset", "Profile", "Provenance", "Purpose", "REGISTRY", "Recording",
     "Representation", "Result", "ResultError", "SingerVector", "Span", "Status", "decide", "lookup",
     "require_allowed", "require_consented_voice",

@@ -224,13 +224,19 @@ class QualityReport:
 
 
 def assess(raw: np.ndarray, sr: int, grid: FrameGrid, voiced: np.ndarray, *, backing: np.ndarray | None = None,
-           policy: QualityPolicy | None = None) -> QualityReport:
-    """Run every check and collect flags.  ``raw`` must be the unprocessed input."""
+           policy: QualityPolicy | None = None, analysis: np.ndarray | None = None) -> QualityReport:
+    """Run every check and collect flags.
+
+    ``raw`` must be the unprocessed input: clipping is always measured on it.
+    ``analysis`` is the signal that is actually analysed (e.g. the separated
+    vocal stem); SNR, bandwidth and backing-track bleed are measured on it.
+    """
     pol = policy or QualityPolicy()
+    sig = raw if analysis is None else np.asarray(analysis, float)
     clip = detect_clipping(raw)
-    snr_r = estimate_snr(raw - np.mean(raw), sr, grid, voiced)
-    bw_r = effective_bandwidth(raw, sr)
-    bleed_r = detect_bleed(raw, backing, sr) if backing is not None else None
+    snr_r = estimate_snr(sig - np.mean(sig), sr, grid, voiced)
+    bw_r = effective_bandwidth(sig, sr)
+    bleed_r = detect_bleed(sig, backing, sr) if backing is not None else None
     rep = QualityReport(clip, snr_r.value if snr_r.usable else None, bw_r.value if bw_r.usable else None,
                         bleed_r.value if (bleed_r is not None and bleed_r.usable) else None)
     if clip.fraction > pol.max_clipping_fraction:

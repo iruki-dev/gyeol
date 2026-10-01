@@ -11,7 +11,16 @@
   "where": {
     "note": "{syllable}",
     "note_unknown": "{index}번째 음",
-    "phrase": "프레이즈 전체"
+    "phrase": "프레이즈 전체",
+    "transition": "{a}→{b}"
+  },
+  "event_span": {
+    "_comment": "Appended to contour/transition items whose span overlaps a detected event.",
+    "suffix": " ({event} 구간)",
+    "scoop": "스쿱",
+    "fall": "폴",
+    "kkeokki": "꺾기",
+    "glide": "글라이드"
   },
   "attribute": {
     "intonation_offset": {
@@ -88,6 +97,14 @@
     },
     "phone_match": {
       "pos": "{where}의 발음이 목표 가수의 실제 발음과 {value}% 비슷해요"
+    },
+    "contour_deviation": {
+      "pos": "{where}에서 음 흐름이 목표보다 {value}센트 높게 지나가요",
+      "neg": "{where}에서 음 흐름이 목표보다 {value}센트 낮게 지나가요"
+    },
+    "transition_deviation": {
+      "pos": "{where} 사이 음 이동이 목표보다 {value}센트 높게 지나가요",
+      "neg": "{where} 사이 음 이동이 목표보다 {value}센트 낮게 지나가요"
     }
   },
   "consistency": {
@@ -130,5 +147,16 @@
   "audibility": {
     "label": "들리는 차이",
     "unavailable": "들리는 차이는 계산하지 않았어요 (본인 목소리 합성 동의가 필요해요)"
+  },
+  "premise": {
+    "octave_invariant": "두 녹음의 음높이 신뢰도가 충분하지 않아 옥타브(조) 관계는 판단하지 않고, 옥타브와 상관없이 비교했어요",
+    "content_aligned": "녹음 시점이 반주와 같은 시계로 맞춰졌는지 확인할 수 없어, 박자·템포는 판단하지 않고 가사·소리 내용으로 맞춰 비교했어요",
+    "withheld": {
+      "shared_clock": "템포와 프레이즈 전체 박자 판단은 보류했어요",
+      "level_chain": "녹음 음량이 고르지 않아(클리핑·반주 섞임) 강약 비교는 보류했어요",
+      "noise_floor": "잡음이나 반주 때문에 숨소리(발성) 비교는 보류했어요",
+      "interval_set": "비교할 음정 간격이 부족해 음정 간격(도약) 판단은 보류했어요",
+      "octave_relation": "옥타브 관계 판단은 보류했어요"
+    }
   }
 }

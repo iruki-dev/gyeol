@@ -98,9 +98,12 @@ def test_semitone_transposition_is_opt_in(target):
 def test_explain_failure_modes(target):
     T = rep_of(target.audio, Provenance.REFERENCE).unwrap()
     assert explain([], T).status is Status.FAILED
+    # a hand-trimmed 1 s clip does not share the target's clock: explained on content alone, timing withheld (revision A3)
     short = rep_of(make_melody().audio[: SR], Provenance.USER).unwrap()
     r = explain([short], T)
-    assert r.status is Status.FAILED and "band" in r.reason
+    assert r.ok and r.value.comparison_mode["timing"] == "content_aligned"
+    assert not r.value.premises["shared_clock"].holds and "band" in r.value.premises["shared_clock"].reason
+    assert not any(i.attribute == "tempo" for i in r.value.items)
 
 
 def test_korean_rendering():

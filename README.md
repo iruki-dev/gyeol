@@ -51,7 +51,13 @@ python examples/discover_demo.py --out /tmp/gyeol_discover
 # evaluation and hardening: robustness grid, ONNX export + latency, model card (needs the [onnx] extra)
 python examples/evaluate_and_export.py --out /tmp/gyeol_m8
 gyeol profile --dsp-only --explain
+# real-recording evaluation on your own folder (manifest.jsonl; see gyeol.eval.realset for the format)
+gyeol eval realset /path/to/realset --split held_out --per-tracker
+# optional: vocal separation weights for analyze(separation="auto") (shows the license, asks first)
+gyeol fetch bs_roformer_viperx_ep317
 ```
+
+Revision notes: `docs/revisions/` (A: analysis path).
 
 ## Install
 

@@ -5,6 +5,32 @@
 gyeol v2 is a rewrite: an interpretable encoder–decoder singing-voice model for vocal coaching. It replaces the
 v0.1 DSP feature engine.
 
+### Revision A — analysis path (see `docs/revisions/A.md`)
+- A1:
+  - `analyze(separation="auto" | "always" | "off")`, with `auto` as the default.
+  - Pitch-informed accompaniment estimator.
+  - BS-RoFormer local-checkpoint loader (`frontend.roformer`); `bs_roformer_viperx_ep317` registered for
+    `gyeol fetch`.
+  - Separation quality and residual accompaniment feed per-frame confidence; a graded penalty applies when
+    accompaniment is suspected but nothing was separated.
+- A2:
+  - The octave/key relation is decided only with confident pitch on both sides; otherwise it is `None` with a
+    reason, and the comparison is octave-invariant.
+  - `gyeol eval realset --per-tracker`.
+- A3:
+  - Premise framework (`Premise`, `WithheldItem`, `Explanation.premises/withheld/comparison_mode`) for shared clock,
+    octave relation, level chain, noise floor and interval set.
+  - Content-based subsequence alignment (`WarpConfig.open_begin`) and relative onset timing when the clock is not
+    shared.
+- A4: Hangul syllabification independent of spaces and punctuation; `assign_syllables`; `explain(lyrics=...)`.
+- A5:
+  - Whole-contour comparison: `contour_deviation` and `transition_deviation`, labelled with detected events.
+  - Demo edits for them.
+  - Knob-recovery truth for fitting their coach thresholds.
+- A6:
+  - Real-recording manifest, singer-disjoint split and `gyeol eval realset`.
+  - Synthetic stand-in set (`eval.realset_synth`).
+
 ### M8 — evaluation and hardening
 - RMVPE reimplemented (reference module layout, strict key-by-key weight loading, chunked tracker in the
   consensus); weights are never bundled or downloaded.

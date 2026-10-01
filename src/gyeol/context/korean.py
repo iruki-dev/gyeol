@@ -19,6 +19,7 @@ optional ``g2pk`` package is installed it can be used instead
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 HANGUL_BASE = 0xAC00
@@ -107,15 +108,23 @@ def decompose(ch: str) -> tuple[str, str, str]:
 
 
 def syllabify(text: str) -> list[Syllable]:
-    """Hangul syllables of ``text`` (non-Hangul characters are skipped)."""
+    """Hangul syllables of ``text``, independent of spacing and punctuation.
+
+    The text is NFC-normalised first, so decomposed Hangul (NFD — common in
+    macOS file names and some lyric sources) yields the same syllables as
+    precomposed text.  Every non-Hangul character (space, any punctuation,
+    Latin, digits, lone compatibility jamo such as ㅋㅋ) is skipped and starts
+    a new word; ``word_initial`` only affects which sound-change rules apply
+    across a boundary.
+    """
     out: list[Syllable] = []
     new_word = True
-    for ch in text:
+    for ch in unicodedata.normalize("NFC", text):
         if is_hangul(ch):
             i, m, f = decompose(ch)
             out.append(Syllable(text=ch, initial=i, medial=m, final=f, word_initial=new_word))
             new_word = False
-        elif ch.isspace() or ch in ",.!?~-":
+        else:
             new_word = True
     return out
 
